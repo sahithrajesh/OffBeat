@@ -22,6 +22,7 @@ export function MainDashboard({ playlists, selectedPlaylists, togglePlaylist, on
   ];
 
   const hasSelection = selectedPlaylists.length > 0;
+  const hasMultiple = selectedPlaylists.length > 1;
 
   // Mobile sidebar toggle
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -159,24 +160,31 @@ export function MainDashboard({ playlists, selectedPlaylists, togglePlaylist, on
 
           {/* Action cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5">
-            {actions.map((action) => (
-              <Card
-                key={action.key}
-                className={`p-5 sm:p-8 rounded-xl sm:rounded-2xl transition-all duration-500 ease-out backdrop-blur-sm ${
-                  hasSelection
-                    ? 'cursor-pointer bg-white/[0.02] border-white/5 hover:bg-white/[0.04] hover:border-brand-cyan/40 hover:shadow-[0_8px_30px_rgba(0,158,250,0.12)] hover:-translate-y-1 active:translate-y-0 group'
-                    : 'cursor-not-allowed opacity-30 bg-white/[0.01] border-white/5'
-                }`}
-                onClick={() => hasSelection && onActionSelect(action.key)}
-              >
-                <h3 className={`font-semibold text-base sm:text-xl transition-colors duration-500 ${hasSelection ? 'text-white group-hover:text-brand-cyan' : 'text-gray-500'}`}>
-                  {action.title}
-                </h3>
-                <p className={`text-xs sm:text-sm mt-2 sm:mt-3 leading-relaxed transition-colors duration-500 ${hasSelection ? 'text-brand-teal/70' : 'text-gray-600'}`}>
-                  {action.desc}
-                </p>
-              </Card>
-            ))}
+            {actions.map((action) => {
+              const enabled = action.key === 'compare' ? hasMultiple : hasSelection;
+              return (
+                <Card
+                  key={action.key}
+                  className={`p-5 sm:p-8 rounded-xl sm:rounded-2xl transition-all duration-500 ease-out backdrop-blur-sm ${
+                    enabled
+                      ? 'cursor-pointer bg-white/[0.02] border-white/5 hover:bg-white/[0.04] hover:border-brand-cyan/40 hover:shadow-[0_8px_30px_rgba(0,158,250,0.12)] hover:-translate-y-1 active:translate-y-0 group'
+                      : 'cursor-not-allowed opacity-30 bg-white/[0.01] border-white/5'
+                  }`}
+                  onClick={() => enabled && onActionSelect(action.key)}
+                >
+                  <h3 className={`font-semibold text-base sm:text-xl transition-colors duration-500 ${
+                    enabled ? 'text-white group-hover:text-brand-cyan' : 'text-gray-500'
+                  }`}>
+                    {action.title}
+                  </h3>
+                  <p className={`text-xs sm:text-sm mt-2 sm:mt-3 leading-relaxed transition-colors duration-500 ${
+                    enabled ? 'text-brand-teal/70' : 'text-gray-600'
+                  }`}>
+                    {action.key === 'compare' && !hasMultiple ? 'Select at least two playlists to compare.' : action.desc}
+                  </p>
+                </Card>
+              );
+            })}
           </div>
         </div>
       </div>

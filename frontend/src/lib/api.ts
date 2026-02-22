@@ -92,11 +92,11 @@ export function fetchPlaylists(signal?: AbortSignal): Promise<Playlist[]> {
   return apiFetch<Playlist[]>("/playlists", { signal });
 }
 
-/** POST /create — create a Spotify playlist from tracks */
-export function createPlaylist(tracks: EnrichedTrack[]): Promise<unknown> {
+/** POST /create — create a Spotify playlist from track IDs */
+export function createPlaylist(trackIds: string[]): Promise<{ status: string; playlist_id: string; url: string }> {
   return apiFetch("/create", {
     method: "POST",
-    body: JSON.stringify(tracks),
+    body: JSON.stringify(trackIds),
   });
 }
 

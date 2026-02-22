@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { ArrowRight, Loader2, AlertTriangle, Menu, X, ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight, Music2 } from 'lucide-react';
+import { ArrowRight, Loader2, AlertTriangle, Menu, X, ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight, Music2, Check } from 'lucide-react';
 import type { Playlist, EnrichedPlaylist } from '@/lib/api';
 import {
   analyzePlaylists,
@@ -39,6 +39,23 @@ const CLUSTER_COLORS = [
   { bg: 'bg-brand-lavender/10', border: 'border-brand-lavender/30', text: 'text-brand-lavender', bar: 'bg-brand-lavender' },
 ];
 
+/** Shared props for track selection across all view components */
+interface TrackSelectionProps {
+  selectedTrackIds: Set<string>;
+  onToggleTrack: (id: string) => void;
+}
+
+/** Reusable selection checkbox */
+function SelectionCheckbox({ selected }: { selected: boolean }) {
+  return (
+    <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-all duration-200 ${
+      selected ? 'bg-brand-cyan border-brand-cyan shadow-[0_0_6px_rgba(0,158,250,0.3)]' : 'border-white/20 hover:border-white/40'
+    }`}>
+      {selected && <Check size={10} className="text-white" />}
+    </div>
+  );
+}
+
 // ── Feature bar mini-component ──
 function FeatureBar({ label, value, unit, color }: { label: string; value: number; max?: number; unit: string; color: string }) {
   const pct = unit === 'dB'
@@ -64,21 +81,30 @@ function FeatureBar({ label, value, unit, color }: { label: string; value: numbe
 }
 
 // ── Anomaly card component ──
-function AnomalyCard({ anomaly }: { anomaly: Anomaly }) {
+function AnomalyCard({ anomaly, selectedTrackIds, onToggleTrack }: { anomaly: Anomaly } & TrackSelectionProps) {
   const [expanded, setExpanded] = useState(false);
   const parsed = useMemo(() => parseAnomalyReason(anomaly.reason), [anomaly.reason]);
   const scoreColor = anomaly.anomaly_score >= 0.9 ? 'text-red-400 bg-red-500/15 border-red-500/30'
     : anomaly.anomaly_score >= 0.85 ? 'text-orange-400 bg-orange-500/15 border-orange-500/30'
     : 'text-yellow-400 bg-yellow-500/15 border-yellow-500/30';
+  const isSelected = selectedTrackIds.has(anomaly.spotify_id);
 
   return (
     <div
-      className={`rounded-xl border transition-all duration-300 ${expanded ? 'bg-white/[0.03] border-white/10' : 'bg-white/[0.01] border-white/5 hover:bg-white/[0.02]'}`}
+      className={`rounded-xl border transition-all duration-300 ${
+        isSelected
+          ? 'bg-brand-cyan/[0.06] border-brand-cyan/30 shadow-[0_0_10px_rgba(0,158,250,0.06)]'
+          : expanded ? 'bg-white/[0.03] border-white/10' : 'bg-white/[0.01] border-white/5 hover:bg-white/[0.02]'
+      }`}
     >
-      <button
-        className="w-full flex items-center gap-3 sm:gap-4 p-3 sm:p-4 text-left"
-        onClick={() => setExpanded(!expanded)}
-      >
+      <div className="w-full flex items-center gap-3 sm:gap-4 p-3 sm:p-4">
+        {/* Selection checkbox */}
+        <button
+          className="shrink-0"
+          onClick={(e) => { e.stopPropagation(); onToggleTrack(anomaly.spotify_id); }}
+        >
+          <SelectionCheckbox selected={isSelected} />
+        </button>
         {/* Score circle */}
         <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl border flex items-center justify-center shrink-0 font-mono text-xs font-bold ${scoreColor}`}>
           {(anomaly.anomaly_score * 100).toFixed(0)}
@@ -91,10 +117,10 @@ function AnomalyCard({ anomaly }: { anomaly: Anomaly }) {
           </div>
         </div>
         {/* Expand toggle */}
-        <div className="shrink-0 text-brand-teal/40">
+        <button className="shrink-0 text-brand-teal/40 hover:text-white transition-colors p-1" onClick={() => setExpanded(!expanded)}>
           {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-        </div>
-      </button>
+        </button>
+      </div>
 
       {expanded && (
         <div className="px-3 sm:px-4 pb-3 sm:pb-4 pt-0 space-y-3 animate-in slide-in-from-top-2 duration-200">
@@ -122,7 +148,7 @@ function AnomalyCard({ anomaly }: { anomaly: Anomaly }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // Analysis Renderer — rich multi-playlist analysis view
 // ═══════════════════════════════════════════════════════════════════════════
-function AnalysisView({ data }: { data: AnalysisResult }) {
+function AnalysisView({ data, selectedTrackIds, onToggleTrack }: { data: AnalysisResult } & TrackSelectionProps) {
   const [activePlaylist, setActivePlaylist] = useState(0);
   const [expandedCluster, setExpandedCluster] = useState<string | null>(null);
   const playlist = data.playlists[activePlaylist];
@@ -276,13 +302,22 @@ function AnalysisView({ data }: { data: AnalysisResult }) {
                           Sample Tracks <span className="text-brand-teal/30">({cluster.tracks.length})</span>
                         </p>
                         <div className="space-y-1">
-                          {cluster.tracks.slice(0, 5).map((t) => (
-                            <div key={t.spotify_id} className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-white/[0.03] transition-colors">
-                              <Music2 size={12} className="text-brand-teal/40 shrink-0" />
-                              <span className="text-xs text-white truncate flex-1">{t.title}</span>
-                              <span className="text-[10px] font-mono text-brand-teal/40">{(t.anomaly_score * 100).toFixed(0)}</span>
-                            </div>
-                          ))}
+                          {cluster.tracks.slice(0, 5).map((t) => {
+                            const isSelected = selectedTrackIds.has(t.spotify_id);
+                            return (
+                              <div
+                                key={t.spotify_id}
+                                onClick={() => onToggleTrack(t.spotify_id)}
+                                className={`flex items-center gap-2 py-1.5 px-2 rounded-lg cursor-pointer transition-all duration-200 ${
+                                  isSelected ? 'bg-brand-cyan/10 ring-1 ring-brand-cyan/30' : 'hover:bg-white/[0.03]'
+                                }`}
+                              >
+                                <SelectionCheckbox selected={isSelected} />
+                                <span className={`text-xs truncate flex-1 ${isSelected ? 'text-brand-cyan' : 'text-white'}`}>{t.title}</span>
+                                <span className="text-[10px] font-mono text-brand-teal/40">{(t.anomaly_score * 100).toFixed(0)}</span>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -296,7 +331,7 @@ function AnalysisView({ data }: { data: AnalysisResult }) {
 
       {/* Anomalies */}
       {playlist.anomalies.length > 0 && (
-        <AnomalySection anomalies={playlist.anomalies} />
+        <AnomalySection anomalies={playlist.anomalies} selectedTrackIds={selectedTrackIds} onToggleTrack={onToggleTrack} />
       )}
     </div>
   );
@@ -305,7 +340,7 @@ function AnalysisView({ data }: { data: AnalysisResult }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // Anomaly View — dedicated anomaly detection visualization
 // ═══════════════════════════════════════════════════════════════════════════
-function AnomalyView({ data }: { data: AnalysisResult }) {
+function AnomalyView({ data, selectedTrackIds, onToggleTrack }: { data: AnalysisResult } & TrackSelectionProps) {
   const [activePlaylist, setActivePlaylist] = useState(0);
   const playlist = data.playlists[activePlaylist];
   const anomalies = playlist.anomalies;
@@ -387,7 +422,7 @@ function AnomalyView({ data }: { data: AnalysisResult }) {
               </div>
               <div className="space-y-1.5">
                 {items.slice(0, 5).map((a) => (
-                  <AnomalyCard key={a.spotify_id} anomaly={a} />
+                  <AnomalyCard key={a.spotify_id} anomaly={a} selectedTrackIds={selectedTrackIds} onToggleTrack={onToggleTrack} />
                 ))}
                 {items.length > 5 && (
                   <p className="text-[11px] text-brand-teal/40 text-center pt-2">+{items.length - 5} more</p>
@@ -399,13 +434,13 @@ function AnomalyView({ data }: { data: AnalysisResult }) {
       </div>
 
       {/* Full ranked list */}
-      <AnomalySection anomalies={anomalies} />
+      <AnomalySection anomalies={anomalies} selectedTrackIds={selectedTrackIds} onToggleTrack={onToggleTrack} />
     </div>
   );
 }
 
 // ── Shared anomaly list section ──
-function AnomalySection({ anomalies }: { anomalies: Anomaly[] }) {
+function AnomalySection({ anomalies, selectedTrackIds, onToggleTrack }: { anomalies: Anomaly[] } & TrackSelectionProps) {
   const [showAll, setShowAll] = useState(false);
   const visible = showAll ? anomalies : anomalies.slice(0, 8);
 
@@ -417,7 +452,7 @@ function AnomalySection({ anomalies }: { anomalies: Anomaly[] }) {
       </h3>
       <div className="space-y-2">
         {visible.map((a) => (
-          <AnomalyCard key={a.spotify_id} anomaly={a} />
+          <AnomalyCard key={a.spotify_id} anomaly={a} selectedTrackIds={selectedTrackIds} onToggleTrack={onToggleTrack} />
         ))}
       </div>
       {anomalies.length > 8 && (
@@ -445,7 +480,7 @@ function SummaryCard({ value, label, color, accent }: { value: number; label: st
 // ═══════════════════════════════════════════════════════════════════════════
 // Recommendations View — track list grouped by source cluster
 // ═══════════════════════════════════════════════════════════════════════════
-function RecommendationsView({ data }: { data: EnrichedPlaylist }) {
+function RecommendationsView({ data, selectedTrackIds, onToggleTrack }: { data: EnrichedPlaylist } & TrackSelectionProps) {
   return (
     <div className="space-y-6 animate-in fade-in duration-700">
       <div className="flex items-center justify-between">
@@ -457,25 +492,34 @@ function RecommendationsView({ data }: { data: EnrichedPlaylist }) {
       </div>
 
       <div className="space-y-2">
-        {data.tracks.map((t, i) => (
-          <div
-            key={`${t.spotify_id}-${i}`}
-            className="flex items-center gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl bg-white/[0.02] border border-white/5 hover:bg-white/[0.04] transition-colors group"
-          >
-            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-brand-cyan/10 flex items-center justify-center shrink-0 text-brand-cyan text-[11px] font-bold">
-              {i + 1}
+        {data.tracks.map((t, i) => {
+          const isSelected = selectedTrackIds.has(t.spotify_id);
+          return (
+            <div
+              key={`${t.spotify_id}-${i}`}
+              onClick={() => onToggleTrack(t.spotify_id)}
+              className={`flex items-center gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border cursor-pointer transition-all duration-200 group ${
+                isSelected
+                  ? 'bg-brand-cyan/[0.06] border-brand-cyan/30 shadow-[0_0_10px_rgba(0,158,250,0.06)]'
+                  : 'bg-white/[0.02] border-white/5 hover:bg-white/[0.04]'
+              }`}
+            >
+              <SelectionCheckbox selected={isSelected} />
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-brand-cyan/10 flex items-center justify-center shrink-0 text-brand-cyan text-[11px] font-bold">
+                {i + 1}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm font-medium truncate transition-colors ${isSelected ? 'text-brand-cyan' : 'text-white group-hover:text-brand-cyan'}`}>{t.title}</p>
+                <p className="text-xs text-brand-teal/50 truncate">
+                  {t.artists.map((a) => a.name).join(', ')} · {t.album_name}
+                </p>
+              </div>
+              <span className="text-xs text-brand-teal/30 whitespace-nowrap hidden sm:inline font-mono">
+                {Math.floor(t.duration_ms / 60000)}:{String(Math.floor((t.duration_ms % 60000) / 1000)).padStart(2, '0')}
+              </span>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white truncate group-hover:text-brand-cyan transition-colors">{t.title}</p>
-              <p className="text-xs text-brand-teal/50 truncate">
-                {t.artists.map((a) => a.name).join(', ')} · {t.album_name}
-              </p>
-            </div>
-            <span className="text-xs text-brand-teal/30 whitespace-nowrap hidden sm:inline font-mono">
-              {Math.floor(t.duration_ms / 60000)}:{String(Math.floor((t.duration_ms % 60000) / 1000)).padStart(2, '0')}
-            </span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -491,7 +535,7 @@ interface ClusterRec {
   recommendations: { spotify_id: string; title: string; artists?: { name: string }[]; album_name?: string }[];
 }
 
-function BasicRecommendationsView({ data }: { data: Record<string, unknown> }) {
+function BasicRecommendationsView({ data, selectedTrackIds, onToggleTrack }: { data: Record<string, unknown> } & TrackSelectionProps) {
   // data is keyed by playlist_id → { playlist_name, clusters: { label: ClusterRec } }
   const entries = Object.entries(data);
   const [activePlaylist, setActivePlaylist] = useState(0);
@@ -558,27 +602,34 @@ function BasicRecommendationsView({ data }: { data: Record<string, unknown> }) {
                 <Badge className={`${c.bg} ${c.text} border-0 text-xs`}>{cluster.recommendations.length}</Badge>
               </div>
               <div className="px-4 sm:px-5 pb-4 sm:pb-5 space-y-1.5">
-                {cluster.recommendations.map((rec, i) => (
-                  <div
-                    key={`${rec.spotify_id}-${i}`}
-                    className="flex items-center gap-3 py-2 px-3 rounded-xl bg-black/20 hover:bg-black/30 transition-colors group"
-                  >
-                    <div className={`w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold ${c.bg} ${c.text}`}>
-                      {i + 1}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-white truncate group-hover:text-brand-cyan transition-colors">
-                        {rec.title}
-                      </p>
-                      {(rec.artists || rec.album_name) && (
-                        <p className="text-xs text-brand-teal/50 truncate">
-                          {rec.artists?.map((a) => a.name).join(', ')}{rec.album_name ? ` · ${rec.album_name}` : ''}
+                {cluster.recommendations.map((rec, i) => {
+                  const isSelected = selectedTrackIds.has(rec.spotify_id);
+                  return (
+                    <div
+                      key={`${rec.spotify_id}-${i}`}
+                      onClick={() => onToggleTrack(rec.spotify_id)}
+                      className={`flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer transition-all duration-200 group ${
+                        isSelected ? 'bg-brand-cyan/10 ring-1 ring-brand-cyan/30' : 'bg-black/20 hover:bg-black/30'
+                      }`}
+                    >
+                      <SelectionCheckbox selected={isSelected} />
+                      <div className={`w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold ${c.bg} ${c.text}`}>
+                        {i + 1}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-medium truncate transition-colors ${isSelected ? 'text-brand-cyan' : 'text-white group-hover:text-brand-cyan'}`}>
+                          {rec.title}
                         </p>
-                      )}
+                        {(rec.artists || rec.album_name) && (
+                          <p className="text-xs text-brand-teal/50 truncate">
+                            {rec.artists?.map((a) => a.name).join(', ')}{rec.album_name ? ` · ${rec.album_name}` : ''}
+                          </p>
+                        )}
+                      </div>
+                      <Music2 size={14} className="text-brand-teal/30 shrink-0" />
                     </div>
-                    <Music2 size={14} className="text-brand-teal/30 shrink-0" />
-                  </div>
-                ))}
+                  );
+                })}
                 {cluster.recommendations.length === 0 && (
                   <p className="text-xs text-brand-teal/40 text-center py-2">No recommendations for this cluster</p>
                 )}
@@ -594,9 +645,9 @@ function BasicRecommendationsView({ data }: { data: Record<string, unknown> }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // Compare View — side-by-side playlist comparison
 // ═══════════════════════════════════════════════════════════════════════════
-function CompareView({ data }: { data: AnalysisResult }) {
+function CompareView({ data, selectedTrackIds, onToggleTrack }: { data: AnalysisResult } & TrackSelectionProps) {
   if (data.playlists.length < 2) {
-    return <AnalysisView data={data} />;
+    return <AnalysisView data={data} selectedTrackIds={selectedTrackIds} onToggleTrack={onToggleTrack} />;
   }
 
   const p1 = data.playlists[0];
@@ -739,6 +790,20 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const label = ACTION_LABELS[currentAction] ?? currentAction;
 
+  // Track selection state
+  const [selectedTrackIds, setSelectedTrackIds] = useState<Set<string>>(new Set());
+
+  const toggleTrack = useCallback((id: string) => {
+    setSelectedTrackIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedTrackIds(new Set()), []);
+
   // Mobile sidebar toggle
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -746,11 +811,11 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
   // Save to Spotify
   // -----------------------------------------------------------------------
   const handleSaveToSpotify = useCallback(async () => {
-    if (!result || !('tracks' in result) || !Array.isArray((result as EnrichedPlaylist).tracks)) return;
+    if (selectedTrackIds.size === 0) return;
     setIsSaving(true);
     setSaveStatus('idle');
     try {
-      await createPlaylist((result as EnrichedPlaylist).tracks);
+      await createPlaylist(Array.from(selectedTrackIds));
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 3000);
     } catch (err) {
@@ -759,7 +824,7 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
     } finally {
       setIsSaving(false);
     }
-  }, [result]);
+  }, [selectedTrackIds]);
 
   // -----------------------------------------------------------------------
   // Run the action once on mount
@@ -811,23 +876,23 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
       const data = result as unknown as AnalysisResult;
 
       if (currentAction === 'anomaly') {
-        return <AnomalyView data={data} />;
+        return <AnomalyView data={data} selectedTrackIds={selectedTrackIds} onToggleTrack={toggleTrack} />;
       }
       if (currentAction === 'compare') {
-        return <CompareView data={data} />;
+        return <CompareView data={data} selectedTrackIds={selectedTrackIds} onToggleTrack={toggleTrack} />;
       }
       // Default: full analysis view
-      return <AnalysisView data={data} />;
+      return <AnalysisView data={data} selectedTrackIds={selectedTrackIds} onToggleTrack={toggleTrack} />;
     }
 
     // Basic recommendations — dict keyed by playlist_id with clusters
     if (currentAction === 'basic' && typeof result === 'object') {
-      return <BasicRecommendationsView data={result as Record<string, unknown>} />;
+      return <BasicRecommendationsView data={result as Record<string, unknown>} selectedTrackIds={selectedTrackIds} onToggleTrack={toggleTrack} />;
     }
 
     // EnrichedPlaylist view (recommendations / basic)
     if ('tracks' in result && Array.isArray((result as EnrichedPlaylist).tracks)) {
-      return <RecommendationsView data={result as EnrichedPlaylist} />;
+      return <RecommendationsView data={result as EnrichedPlaylist} selectedTrackIds={selectedTrackIds} onToggleTrack={toggleTrack} />;
     }
 
     // Generic JSON fallback
@@ -860,20 +925,30 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
         </div>
       </ScrollArea>
 
-      <div className="p-4 lg:p-6 border-t border-white/5">
+      <div className="p-4 lg:p-6 border-t border-white/5 space-y-2">
+        {selectedTrackIds.size > 0 && (
+          <div className="flex items-center justify-between text-xs px-1">
+            <span className="text-brand-teal/60">{selectedTrackIds.size} track{selectedTrackIds.size !== 1 ? 's' : ''} selected</span>
+            <button onClick={clearSelection} className="text-brand-teal/40 hover:text-white transition-colors">
+              Clear
+            </button>
+          </div>
+        )}
         <Button
           variant="outline"
           onClick={handleSaveToSpotify}
-          disabled={isSaving || !result || !('tracks' in result)}
+          disabled={isSaving || selectedTrackIds.size === 0}
           className={`w-full h-10 lg:h-12 rounded-xl text-sm text-white transition-all duration-300 ${
             saveStatus === 'success' ? 'bg-green-500/20 border-green-500/50 text-green-400 hover:bg-green-500/30' :
             saveStatus === 'error' ? 'bg-red-500/20 border-red-500/50 text-red-400 hover:bg-red-500/30' :
+            selectedTrackIds.size > 0 ? 'border-brand-cyan/40 bg-brand-cyan/10 hover:bg-brand-cyan/20 text-brand-cyan' :
             'border-white/10 hover:bg-white/5 hover:text-white bg-transparent'
           }`}
         >
           {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
           {saveStatus === 'success' ? 'Saved!' :
            saveStatus === 'error' ? 'Failed' :
+           selectedTrackIds.size > 0 ? `Create Playlist (${selectedTrackIds.size})` :
            'Create Playlist'}
         </Button>
       </div>

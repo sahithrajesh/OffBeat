@@ -477,12 +477,12 @@ async def anomaly_playlist(
 
 
 @app.post("/create")
-async def create_playlist(
-    tracks: list[EnrichedTrack],
+async def create_playlist_endpoint(
+    track_ids: list[str],
     spotify_id: str = Depends(require_auth),
 ):
-    """Create a Spotify playlist from a list of enriched tracks."""
-    if not tracks:
+    """Create a Spotify playlist from a list of Spotify track IDs."""
+    if not track_ids:
         raise HTTPException(status_code=400, detail="No tracks provided.")
 
     # 1. Grab the fresh token
@@ -498,7 +498,7 @@ async def create_playlist(
         )
         
         # 3. Format tracks as Spotify URIs and push them
-        track_uris = [f"spotify:track:{t.spotify_id}" for t in tracks]
+        track_uris = [f"spotify:track:{tid}" for tid in track_ids]
         await add_tracks_to_playlist(access_token, playlist_id, track_uris)
         
         return {
