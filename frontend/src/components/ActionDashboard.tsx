@@ -733,7 +733,7 @@ interface ActionDashboardProps {
 export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction }: ActionDashboardProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<Record<string, unknown> | EnrichedPlaylist | null>(null);
+  const [result, setResult] = useState<AnalysisResult | Record<string, unknown> | EnrichedPlaylist | null>(null);
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');

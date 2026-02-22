@@ -143,6 +143,7 @@ interface RawAnalysisResponse {
  *  frontend `AnalysisResult` shape (clusters Record + flat anomalies). */
 function transformAnalysisResponse(raw: RawAnalysisResponse): AnalysisResult {
   return {
+    generated_at: new Date().toISOString(),
     num_playlists: raw.num_playlists,
     playlists: raw.playlists.map((p) => {
       // Array → Record keyed by label
@@ -154,7 +155,7 @@ function transformAnalysisResponse(raw: RawAnalysisResponse): AnalysisResult {
           centroid_features: {
             audio_means: Object.fromEntries(
               Object.entries(c.centroid_features.audio_means).map(([k, v]) => [k, v ?? 0]),
-            ) as Cluster["centroid_features"]["audio_means"],
+            ) as unknown as Cluster["centroid_features"]["audio_means"],
             top_tags: c.centroid_features.top_tags,
             tag_weights_top: c.centroid_features.tag_weights_top,
           },
