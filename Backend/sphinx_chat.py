@@ -382,6 +382,8 @@ async def run_sphinx(
             }
 
         logger.info(f"[sphinx] CLI completed, parsing notebook…")
+        logger.info(f"[sphinx] CLI stdout: {stdout_text[:500]}")
+        logger.info(f"[sphinx] CLI stderr: {stderr_text[:500]}")
 
     except asyncio.TimeoutError:
         logger.error("[sphinx] CLI timed out")
@@ -401,13 +403,14 @@ async def run_sphinx(
         }
 
     # Parse the modified notebook for new cells
-    return _parse_notebook_response(nb_path, prev_cell_count, user_id)
+    return _parse_notebook_response(nb_path, prev_cell_count, user_id, stdout_text)
 
 
 def _parse_notebook_response(
     nb_path: str,
     prev_cell_count: int,
     user_id: str,
+    cli_stdout: str = "",
 ) -> Dict[str, Any]:
     """Read the notebook and extract content from newly-added cells."""
     try:
@@ -423,6 +426,15 @@ def _parse_notebook_response(
 
     cells = nb.get("cells", [])
     new_cells = cells[prev_cell_count:]
+
+    logger.info(
+        f"[sphinx] Notebook has {len(cells)} cells total, "
+        f"prev_cell_count={prev_cell_count}, new_cells={len(new_cells)}"
+    )
+
+    # If sphinx-cli didn't add cells to the notebook, it may have written
+    # its response to stdout instead.  Fall through to the text_parts logic
+    # which will be empty, and the caller can check stdout.
 
     # Update session state
     if user_id in _SESSION_STATE:
@@ -478,7 +490,14 @@ def _parse_notebook_response(
                     text_parts.append(f"**{ename}**: {evalue}")
 
     # Combine text
-    combined_text = "\n\n".join(text_parts) if text_parts else "Analysis complete."
+    if text_parts:
+        combined_text = "\n\n".join(text_parts)
+    elif cli_stdout.strip():
+        # Sphinx may have written its answer to stdout instead of the notebook
+        logger.info("[sphinx] No new notebook cells found, using CLI stdout as response")
+        combined_text = cli_stdout.strip()
+    else:
+        combined_text = "I wasn't able to generate a response. Please try rephrasing your question."
 
     return {
         "text": combined_text,
