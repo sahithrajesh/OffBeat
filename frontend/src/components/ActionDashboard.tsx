@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -36,9 +36,6 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const label = ACTION_LABELS[currentAction] ?? currentAction;
-
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
 
   // Mobile sidebar toggle
   const [sidebarOpen, setSidebarOpen] = useState(false);
