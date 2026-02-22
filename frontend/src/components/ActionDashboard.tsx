@@ -6,10 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { ArrowRight, Loader2, AlertTriangle, Menu, X, ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight, Music2 } from 'lucide-react';
 import type { Playlist, EnrichedPlaylist } from '@/lib/api';
 import {
-  fetchAnalysis,
-  comparePlaylist,
+  analyzePlaylists,
   basicRecommendations,
-  anomalyRecommendations,
   createPlaylist,
 } from '@/lib/api';
 import {
@@ -484,6 +482,116 @@ function RecommendationsView({ data }: { data: EnrichedPlaylist }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Basic Recommendations View — cluster-grouped recommendations
+// ═══════════════════════════════════════════════════════════════════════════
+interface ClusterRec {
+  cluster_id: number;
+  num_input_tracks: number;
+  num_recommendations: number;
+  recommendations: { spotify_id: string; title: string; artists?: { name: string }[]; album_name?: string }[];
+}
+
+function BasicRecommendationsView({ data }: { data: Record<string, unknown> }) {
+  // data is keyed by playlist_id → { playlist_name, clusters: { label: ClusterRec } }
+  const entries = Object.entries(data);
+  const [activePlaylist, setActivePlaylist] = useState(0);
+
+  // Filter out entries that aren't playlist objects (e.g. metadata fields)
+  const playlistEntries = entries.filter(
+    ([, v]) => typeof v === 'object' && v !== null && 'playlist_name' in (v as Record<string, unknown>),
+  ) as [string, { playlist_name: string; clusters: Record<string, ClusterRec> }][];
+
+  if (playlistEntries.length === 0) {
+    return <p className="text-brand-teal/60 text-sm">No recommendations generated.</p>;
+  }
+
+  const totalRecs = playlistEntries.reduce(
+    (sum, [, pl]) => sum + Object.values(pl.clusters).reduce((s, c) => s + c.recommendations.length, 0),
+    0,
+  );
+
+  const [, activePl] = playlistEntries[activePlaylist] ?? playlistEntries[0];
+
+  return (
+    <div className="space-y-6 sm:space-y-10 animate-in fade-in duration-700">
+      {/* Playlist tabs */}
+      {playlistEntries.length > 1 && (
+        <div className="flex gap-2 overflow-x-auto pb-2 -mb-2 scrollbar-none">
+          {playlistEntries.map(([pid, pl], i) => (
+            <button
+              key={pid}
+              onClick={() => setActivePlaylist(i)}
+              className={`shrink-0 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-300 border ${
+                i === activePlaylist
+                  ? 'bg-brand-cyan/15 border-brand-cyan/40 text-brand-cyan shadow-[0_0_15px_rgba(0,158,250,0.1)]'
+                  : 'bg-white/[0.02] border-white/5 text-brand-teal/60 hover:text-white hover:border-white/10'
+              }`}
+            >
+              {pl.playlist_name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Summary */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-4">
+        <SummaryCard value={playlistEntries.length} label="Playlists" color="text-white" />
+        <SummaryCard value={Object.keys(activePl.clusters).length} label="Clusters" color="text-brand-magenta" />
+        <SummaryCard value={totalRecs} label="Total Recs" color="text-brand-cyan" />
+      </div>
+
+      {/* Per-cluster recommendations */}
+      <div className="space-y-4">
+        {Object.entries(activePl.clusters).map(([label, cluster], idx) => {
+          const c = CLUSTER_COLORS[idx % CLUSTER_COLORS.length];
+          return (
+            <div key={label} className={`border rounded-xl sm:rounded-2xl ${c.bg} ${c.border} overflow-hidden`}>
+              <div className="p-4 sm:p-5 flex items-center justify-between">
+                <div>
+                  <h4 className={`text-sm sm:text-base font-bold capitalize ${c.text}`}>
+                    {label.replace(/_/g, ' ')}
+                  </h4>
+                  <p className="text-xs text-brand-teal/50 mt-0.5">
+                    {cluster.num_input_tracks} seed tracks → {cluster.recommendations.length} recommendations
+                  </p>
+                </div>
+                <Badge className={`${c.bg} ${c.text} border-0 text-xs`}>{cluster.recommendations.length}</Badge>
+              </div>
+              <div className="px-4 sm:px-5 pb-4 sm:pb-5 space-y-1.5">
+                {cluster.recommendations.map((rec, i) => (
+                  <div
+                    key={`${rec.spotify_id}-${i}`}
+                    className="flex items-center gap-3 py-2 px-3 rounded-xl bg-black/20 hover:bg-black/30 transition-colors group"
+                  >
+                    <div className={`w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold ${c.bg} ${c.text}`}>
+                      {i + 1}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-white truncate group-hover:text-brand-cyan transition-colors">
+                        {rec.title}
+                      </p>
+                      {(rec.artists || rec.album_name) && (
+                        <p className="text-xs text-brand-teal/50 truncate">
+                          {rec.artists?.map((a) => a.name).join(', ')}{rec.album_name ? ` · ${rec.album_name}` : ''}
+                        </p>
+                      )}
+                    </div>
+                    <Music2 size={14} className="text-brand-teal/30 shrink-0" />
+                  </div>
+                ))}
+                {cluster.recommendations.length === 0 && (
+                  <p className="text-xs text-brand-teal/40 text-center py-2">No recommendations for this cluster</p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Compare View — side-by-side playlist comparison
 // ═══════════════════════════════════════════════════════════════════════════
 function CompareView({ data }: { data: AnalysisResult }) {
@@ -661,30 +769,19 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
     setError(null);
     setResult(null);
     try {
-      // Always fetch the pre-computed analysis from the backend first
-      const analysisData = await fetchAnalysis();
+      const playlistIds = selectedPlaylists.map((p) => p.spotify_id);
 
       switch (currentAction) {
-        case 'analysis': {
+        case 'analysis':
+        case 'compare':
+        case 'anomaly': {
+          // All three views render from the same AnalysisResult shape.
+          const analysisData = await analyzePlaylists(playlistIds);
           setResult(analysisData);
           break;
         }
-        case 'compare': {
-          if (selectedPlaylists.length > 0) {
-            const cmp = await comparePlaylist(analysisData, selectedPlaylists[0]);
-            setResult(cmp);
-          } else {
-            setResult(analysisData);
-          }
-          break;
-        }
         case 'basic': {
-          const rec = await basicRecommendations(analysisData);
-          setResult(rec);
-          break;
-        }
-        case 'anomaly': {
-          const rec = await anomalyRecommendations(analysisData);
+          const rec = await basicRecommendations(playlistIds);
           setResult(rec);
           break;
         }
@@ -721,6 +818,11 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
       }
       // Default: full analysis view
       return <AnalysisView data={data} />;
+    }
+
+    // Basic recommendations — dict keyed by playlist_id with clusters
+    if (currentAction === 'basic' && typeof result === 'object') {
+      return <BasicRecommendationsView data={result as Record<string, unknown>} />;
     }
 
     // EnrichedPlaylist view (recommendations / basic)

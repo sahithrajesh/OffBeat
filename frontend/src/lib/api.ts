@@ -104,38 +104,132 @@ export function createPlaylist(tracks: EnrichedTrack[]): Promise<unknown> {
 // Analysis & recommendations
 // ---------------------------------------------------------------------------
 
-/** GET /analysis — fetch the pre-computed playlist analysis insights */
-export function fetchAnalysis(): Promise<Record<string, unknown>> {
-  return apiFetch<Record<string, unknown>>("/analysis");
+import type {
+  AnalysisResult,
+  AnalysisPlaylist,
+  AnalysisTrack,
+  Cluster,
+  Anomaly,
+} from "./placeholderData";
+
+/** Raw backend response shape (clusters as array). */
+interface RawCluster {
+  cluster_id: number;
+  label: string;
+  size: number;
+  centroid_features: {
+    audio_means: Record<string, number | null>;
+    top_tags: string[];
+    tag_weights_top: Record<string, number>;
+  };
+  member_track_ids: string[];
+  tracks: AnalysisTrack[];
 }
 
-/** POST /compare — compare a playlist against analysis data */
-export function comparePlaylist(
-  analysisData: Record<string, unknown>,
-  playlist: Playlist,
+interface RawAnalysisPlaylist {
+  playlist_id: string;
+  playlist_name: string;
+  clusters: RawCluster[];
+  moods: Record<string, unknown>;
+  summary: AnalysisPlaylist["summary"];
+}
+
+interface RawAnalysisResponse {
+  num_playlists: number;
+  playlists: RawAnalysisPlaylist[];
+}
+
+/** Transform the new backend response (clusters array) into the
+ *  frontend `AnalysisResult` shape (clusters Record + flat anomalies). */
+function transformAnalysisResponse(raw: RawAnalysisResponse): AnalysisResult {
+  return {
+    num_playlists: raw.num_playlists,
+    playlists: raw.playlists.map((p) => {
+      // Array → Record keyed by label
+      const clusters: Record<string, Cluster> = {};
+      for (const c of p.clusters) {
+        clusters[c.label] = {
+          cluster_id: c.cluster_id,
+          size: c.size,
+          centroid_features: {
+            audio_means: Object.fromEntries(
+              Object.entries(c.centroid_features.audio_means).map(([k, v]) => [k, v ?? 0]),
+            ) as Cluster["centroid_features"]["audio_means"],
+            top_tags: c.centroid_features.top_tags,
+            tag_weights_top: c.centroid_features.tag_weights_top,
+          },
+          tracks: c.tracks,
+        };
+      }
+
+      // Extract anomalies from cluster tracks
+      const anomalies: Anomaly[] = [];
+      for (const c of p.clusters) {
+        for (const t of c.tracks) {
+          if (t.is_anomaly) {
+            anomalies.push({
+              spotify_id: t.spotify_id,
+              title: t.title,
+              cluster_id: t.cluster_id ?? c.cluster_id,
+              anomaly_score: t.anomaly_score,
+              reason: t.reason,
+            });
+          }
+        }
+      }
+      anomalies.sort((a, b) => b.anomaly_score - a.anomaly_score);
+
+      return {
+        playlist_id: p.playlist_id,
+        playlist_name: p.playlist_name,
+        summary: p.summary,
+        clusters,
+        anomalies,
+      };
+    }),
+  };
+}
+
+/**
+ * POST /analysis — enrich + analyse selected playlists.
+ * Returns an `AnalysisResult` ready for the UI.
+ */
+export async function analyzePlaylists(
+  playlistIds: string[],
+): Promise<AnalysisResult> {
+  const raw = await apiFetch<RawAnalysisResponse>("/analysis", {
+    method: "POST",
+    body: JSON.stringify(playlistIds),
+  });
+  return transformAnalysisResponse(raw);
+}
+
+/** POST /compare — compare playlists by mood distribution */
+export function comparePlaylists(
+  playlistIds: string[],
 ): Promise<Record<string, unknown>> {
   return apiFetch<Record<string, unknown>>("/compare", {
     method: "POST",
-    body: JSON.stringify({ analysis_data: analysisData, playlist }),
+    body: JSON.stringify(playlistIds),
   });
 }
 
-/** POST /basic — generate recommendations from analysis data */
+/** POST /basic — generate recommendations for selected playlists */
 export function basicRecommendations(
-  analysisData: Record<string, unknown>,
-): Promise<EnrichedPlaylist> {
-  return apiFetch<EnrichedPlaylist>("/basic", {
+  playlistIds: string[],
+): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>("/basic", {
     method: "POST",
-    body: JSON.stringify(analysisData),
+    body: JSON.stringify(playlistIds),
   });
 }
 
-/** POST /anomaly — anomaly-based recommendations from analysis data */
-export function anomalyRecommendations(
-  analysisData: Record<string, unknown>,
-): Promise<EnrichedPlaylist> {
-  return apiFetch<EnrichedPlaylist>("/anomaly", {
+/** POST /anomaly — get anomaly tracks from selected playlists */
+export function fetchAnomalies(
+  playlistIds: string[],
+): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>("/anomaly", {
     method: "POST",
-    body: JSON.stringify(analysisData),
+    body: JSON.stringify(playlistIds),
   });
 }

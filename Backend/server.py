@@ -54,6 +54,14 @@ from enricher import enrich_playlists
 from pocketbase_client import upsert_user, get_valid_access_token, get_user
 from session import create_session_token, verify_session_token
 from reccobeats_client import get_cluster_recommendations
+from analysis import (
+    run_playlist_analysis,
+    run_playlists_analysis,
+    compare_playlists as compare_playlists_analysis,
+    select_tracks_by_mood,
+    analysis_output_to_dict,
+    clear_cache as clear_analysis_cache,
+)
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -334,23 +342,6 @@ async def my_playlists(spotify_id: str = Depends(require_auth)):
     return results
 
 
-@app.get("/analysis")
-async def get_cached_analysis(
-    spotify_id: str = Depends(require_auth),
-):
-    """Return the pre-computed playlist analysis insights.
-
-    Reads ``playlist_analysis_insights.json`` from disk and returns it
-    as-is.  This avoids re-running the heavy analysis notebook for every
-    action the frontend triggers.
-    """
-    import json, pathlib
-    path = pathlib.Path(__file__).parent / "playlist_analysis_insights.json"
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="No cached analysis found. Run the analysis notebook first.")
-    return json.loads(path.read_text())
-
-
 @app.post("/analysis")
 async def analyze_playlists(
     playlist_ids: list[str],
@@ -359,43 +350,86 @@ async def analyze_playlists(
     """Analyse selected playlists (full pipeline).
 
     Accepts a list of Spotify playlist IDs from the frontend.
-    Enrichment happens transparently, then the analysis notebook
-    is executed via papermill.
+    Enrichment happens transparently, then clustering + anomaly
+    detection runs in-process via the ``analysis`` module.
+
+    Returns per-playlist analysis (clusters, moods, anomalies, summary).
     """
     enriched = await _get_enriched_playlists(spotify_id, playlist_ids)
     if not enriched:
         raise HTTPException(status_code=404, detail="No playlists found to analyse.")
-    raise HTTPException(status_code=501, detail="Not implemented")  # TODO: Implement papermill execution
+
+    analyses = run_playlists_analysis(enriched)
+    return {
+        "num_playlists": len(analyses),
+        "playlists": [analysis_output_to_dict(a) for a in analyses],
+    }
 
 
 @app.post("/compare")
 async def compare_playlist(
-    analysis_data: dict,
-    playlist_id: str,
+    playlist_ids: list[str],
     spotify_id: str = Depends(require_auth),
 ):
-    """Compare a playlist against analysis data.
+    """Compare multiple playlists by mood distribution.
 
-    The playlist is enriched transparently if not already cached.
+    Requires at least 2 playlist IDs.  Enrichment + analysis happen
+    transparently.
     """
-    enriched = await _get_enriched_playlists(spotify_id, [playlist_id])
-    if not enriched:
-        raise HTTPException(status_code=404, detail=f"Playlist {playlist_id} not found.")
-    # TODO: Implement comparison logic using `enriched[0]` + `analysis_data`
-    raise HTTPException(status_code=501, detail="Not implemented")
+    enriched = await _get_enriched_playlists(spotify_id, playlist_ids)
+    if len(enriched) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="At least 2 playlists are required for comparison.",
+        )
+    return compare_playlists_analysis(enriched)
 
 
 @app.post("/basic")
 async def basic_playlist(
-    analysis_data: dict,
+    playlist_ids: list[str],
     spotify_id: str = Depends(require_auth),
 ):
     """Generate cluster-based recommendations from analysis data.
 
-    Accepts the analysis insights JSON (output of the /analysis endpoint).
-    For each cluster, seeds are sent in groups of 5 to the ReccoBeats
-    recommendation API, returning 1 recommendation per 5 seeds (5:1 ratio).
+    Accepts a list of Spotify playlist IDs.  Enrichment + analysis happen
+    transparently, then for each cluster, seeds are sent in groups of 5
+    to the ReccoBeats recommendation API (5:1 ratio).
     """
+    enriched = await _get_enriched_playlists(spotify_id, playlist_ids)
+    if not enriched:
+        raise HTTPException(status_code=404, detail="No playlists found.")
+
+    # Run analysis and convert to the dict format get_cluster_recommendations expects
+    analyses = run_playlists_analysis(enriched)
+    rec_input_playlists = []
+    for a in analyses:
+        clusters_dict = {}
+        for c in a.clusters:
+            clusters_dict[c.label] = {
+                "cluster_id": c.cluster_id,
+                "size": c.size,
+                "centroid_features": {
+                    "audio_means": c.centroid_features.audio_means,
+                    "top_tags": c.centroid_features.top_tags,
+                    "tag_weights_top": c.centroid_features.tag_weights_top,
+                },
+                "tracks": [
+                    {
+                        "spotify_id": t.spotify_id,
+                        "title": t.title,
+                        "is_anomaly": t.is_anomaly,
+                    }
+                    for t in c.tracks
+                ],
+            }
+        rec_input_playlists.append({
+            "playlist_id": a.playlist_id,
+            "playlist_name": a.playlist_name,
+            "clusters": clusters_dict,
+        })
+    analysis_data = {"playlists": rec_input_playlists}
+
     try:
         recommendations = await get_cluster_recommendations(analysis_data)
     except Exception as e:
@@ -408,14 +442,38 @@ async def basic_playlist(
     return recommendations
 
 
-@app.post("/anomaly", response_model=EnrichedPlaylist)
+@app.post("/anomaly")
 async def anomaly_playlist(
-    analysis_data: dict,
+    playlist_ids: list[str],
     spotify_id: str = Depends(require_auth),
 ):
-    """Generate an anomaly-based playlist from analysis data."""
-    # TODO: Implement anomaly detection logic
-    raise HTTPException(status_code=501, detail="Not implemented")
+    """Return anomaly tracks across the selected playlists.
+
+    Enrichment + analysis happen transparently.  Returns the anomaly
+    tracks from each playlist's analysis.
+    """
+    enriched = await _get_enriched_playlists(spotify_id, playlist_ids)
+    if not enriched:
+        raise HTTPException(status_code=404, detail="No playlists found.")
+
+    all_anomalies: list[dict] = []
+    for pl in enriched:
+        analysis = run_playlist_analysis(pl)
+        for cluster in analysis.clusters:
+            for tr in cluster.tracks:
+                if tr.is_anomaly:
+                    all_anomalies.append({
+                        "spotify_id": tr.spotify_id,
+                        "title": tr.title,
+                        "cluster_id": tr.cluster_id,
+                        "anomaly_score": tr.anomaly_score,
+                        "reason": tr.reason,
+                        "playlist_id": pl.spotify_id,
+                        "playlist_name": pl.name,
+                    })
+
+    all_anomalies.sort(key=lambda x: x.get("anomaly_score") or 0, reverse=True)
+    return {"anomalies": all_anomalies, "count": len(all_anomalies)}
 
 
 @app.post("/create")
