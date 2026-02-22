@@ -67,6 +67,7 @@ async def _ensure_jupyter_server() -> str:
         "--no-browser",
         "--ServerApp.root_dir", str(_SESSIONS_DIR),
         "--ServerApp.disable_check_xsrf", "True",
+        "--allow-root",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
