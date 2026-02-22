@@ -54,6 +54,7 @@ from enricher import enrich_playlists
 from pocketbase_client import upsert_user, get_valid_access_token, get_user
 from session import create_session_token, verify_session_token
 from reccobeats_client import get_cluster_recommendations
+from notebook_runner import run_analysis_notebook
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -334,20 +335,50 @@ async def my_playlists(spotify_id: str = Depends(require_auth)):
     return results
 
 
+@app.get("/analysis")
+async def get_cached_analysis(
+    spotify_id: str = Depends(require_auth),
+):
+    """Return the pre-computed playlist analysis insights.
+
+    Reads ``playlist_analysis_insights.json`` from disk and returns it
+    as-is.  This avoids re-running the heavy analysis notebook for every
+    action the frontend triggers.
+    """
+    import json, pathlib
+    path = pathlib.Path(__file__).parent / "playlist_analysis_insights.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="No cached analysis found. Run the analysis notebook first.")
+    return json.loads(path.read_text())
+
+
 @app.post("/analysis")
 async def analyze_playlists(
     playlist_ids: list[str],
     spotify_id: str = Depends(require_auth),
 ):
-    """Analyse selected playlists.
+    """Analyse selected playlists (full pipeline).
 
-    Enrichment happens transparently — just send playlist IDs.
+    Accepts a list of Spotify playlist IDs from the frontend.
+    Enrichment happens transparently, then the analysis notebook
+    is executed via papermill.
     """
     enriched = await _get_enriched_playlists(spotify_id, playlist_ids)
     if not enriched:
         raise HTTPException(status_code=404, detail="No playlists found to analyse.")
-    # TODO: Implement analysis logic using `enriched`
-    raise HTTPException(status_code=501, detail="Not implemented")
+
+    try:
+        results = run_analysis_notebook(enriched)
+    except RuntimeError as exc:
+        logger.exception("Analysis notebook failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    if not results:
+        raise HTTPException(status_code=500, detail="Analysis produced no results.")
+
+    # Return as JSON-serializable dicts
+    from dataclasses import asdict
+    return [asdict(r) for r in results]
 
 
 @app.post("/compare")
