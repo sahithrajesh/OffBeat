@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Disc3, Check, AlertCircle, Menu, X } from 'lucide-react';
+import { Disc3, Check, AlertCircle, Menu, X, LogOut } from 'lucide-react';
 import type { Playlist } from '@/lib/api';
 import { fetchMe } from '@/lib/api';
-import { getToken } from '@/lib/auth';
+import { getToken, clearToken, AuthError } from '@/lib/auth';
 
 interface MainDashboardProps {
   playlists: Playlist[];
@@ -14,6 +15,8 @@ interface MainDashboardProps {
 }
 
 export function MainDashboard({ playlists, selectedPlaylists, togglePlaylist, onActionSelect }: MainDashboardProps) {
+  const navigate = useNavigate();
+  
   const actions = [
     { title: "Anomaly Detection",     key: "anomaly", desc: "Find songs that don't belong in these playlists." },
     { title: "Playlist Analysis",     key: "analysis", desc: "Run Sphinx AI analysis on your selected playlists." },
@@ -34,8 +37,45 @@ export function MainDashboard({ playlists, selectedPlaylists, togglePlaylist, on
     if (!getToken()) return;
     fetchMe()
       .then((profile) => setUser(profile))
-      .catch(() => setUser(null));
+      .catch((error) => {
+        // If we get a 401, it means the token is invalid or expired
+        if (error instanceof AuthError && error.status === 401) {
+          // Clear the invalid token and any auth-related data
+          handleLogout();
+        }
+        // For other errors, just clear the user state
+        setUser(null);
+      });
   }, []);
+
+  // Logout function — clears token and all caches/cookies
+  const handleLogout = async () => {
+    // Clear the JWT token
+    clearToken();
+    
+    // Clear all cookies
+    document.cookie.split(";").forEach((c) => {
+      const eqPos = c.indexOf("=");
+      const name = eqPos > -1 ? c.substring(0, eqPos).trim() : c.trim();
+      if (name) {
+        document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;SameSite=Lax`;
+        document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=${window.location.hostname};SameSite=Lax`;
+      }
+    });
+    
+    // Clear sessionStorage and other storage
+    sessionStorage.clear();
+    
+    // Clear any other local data if needed (but keep localStorage minimal)
+    Object.keys(localStorage).forEach((key) => {
+      if (key.startsWith('hacklytics_') || key.startsWith('auth_')) {
+        localStorage.removeItem(key);
+      }
+    });
+    
+    // Navigate to login
+    navigate('/', { replace: true });
+  };
 
   // Close sidebar when a playlist is toggled on mobile
   const handleTogglePlaylist = (id: string) => {
@@ -102,8 +142,15 @@ export function MainDashboard({ playlists, selectedPlaylists, togglePlaylist, on
           })}
         </div>
       </ScrollArea>
-      <div className="p-4 lg:p-6 border-t border-white/5 bg-gray-950 text-xs font-medium text-brand-teal/50">
-        {user ? `@${user.display_name}` : '@…'}
+      <div className="p-4 lg:p-6 border-t border-white/5 bg-gray-950 text-xs font-medium text-brand-teal/50 flex items-center justify-between gap-3">
+        <span>{user ? `@${user.display_name}` : '@…'}</span>
+        <button
+          onClick={handleLogout}
+          className="p-1.5 rounded-lg text-brand-teal/60 hover:text-white hover:bg-white/[0.08] transition-all duration-300"
+          title="Log out"
+        >
+          <LogOut size={16} />
+        </button>
       </div>
     </>
   );
