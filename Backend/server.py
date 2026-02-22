@@ -398,7 +398,12 @@ async def basic_playlist(
     playlist_ids: list[str],
     spotify_id: str = Depends(require_auth),
 ):
-    """Generate cluster-based recommendations from analysis data.
+    """Generate cluster-based recommendations from aggregated analysis.
+
+    When multiple playlists are selected, all tracks are aggregated
+    together and analyzed as a single corpus, then recommendations are
+    generated from that combined analysis. This is faster and produces
+    more cohesive recommendations compared to per-playlist analysis.
 
     Accepts a list of Spotify playlist IDs.  Enrichment + analysis happen
     transparently, then for each cluster, seeds are sent in groups of 5
@@ -408,35 +413,51 @@ async def basic_playlist(
     if not enriched:
         raise HTTPException(status_code=404, detail="No playlists found.")
 
-    # Run analysis and convert to the dict format get_cluster_recommendations expects
-    analyses = run_playlists_analysis(enriched)
-    rec_input_playlists = []
-    for a in analyses:
-        clusters_dict = {}
-        for c in a.clusters:
-            clusters_dict[c.label] = {
-                "cluster_id": c.cluster_id,
-                "size": c.size,
-                "centroid_features": {
-                    "audio_means": c.centroid_features.audio_means,
-                    "top_tags": c.centroid_features.top_tags,
-                    "tag_weights_top": c.centroid_features.tag_weights_top,
-                },
-                "tracks": [
-                    {
-                        "spotify_id": t.spotify_id,
-                        "title": t.title,
-                        "is_anomaly": t.is_anomaly,
-                    }
-                    for t in c.tracks
-                ],
+    # Aggregate all playlists into a single virtual playlist for unified analysis
+    aggregated_playlist = EnrichedPlaylist(
+        spotify_id="aggregated",
+        name="Aggregated Playlists",
+        tracks=[],
+        total_tracks=0,
+    )
+    
+    for pl in enriched:
+        aggregated_playlist.tracks.extend(pl.tracks or [])
+    aggregated_playlist.total_tracks = len(aggregated_playlist.tracks)
+
+    # Run analysis once on the aggregated playlist (much faster than per-playlist)
+    analysis = run_playlist_analysis(aggregated_playlist, use_cache=False)
+    
+    # Convert to the dict format get_cluster_recommendations expects
+    clusters_dict = {}
+    for c in analysis.clusters:
+        clusters_dict[c.label] = {
+            "cluster_id": c.cluster_id,
+            "size": c.size,
+            "centroid_features": {
+                "audio_means": c.centroid_features.audio_means,
+                "top_tags": c.centroid_features.top_tags,
+                "tag_weights_top": c.centroid_features.tag_weights_top,
+            },
+            "tracks": [
+                {
+                    "spotify_id": t.spotify_id,
+                    "title": t.title,
+                    "is_anomaly": t.is_anomaly,
+                }
+                for t in c.tracks
+            ],
+        }
+    
+    analysis_data = {
+        "playlists": [
+            {
+                "playlist_id": "aggregated",
+                "playlist_name": "Aggregated Playlists",
+                "clusters": clusters_dict,
             }
-        rec_input_playlists.append({
-            "playlist_id": a.playlist_id,
-            "playlist_name": a.playlist_name,
-            "clusters": clusters_dict,
-        })
-    analysis_data = {"playlists": rec_input_playlists}
+        ]
+    }
 
     try:
         recommendations = await get_cluster_recommendations(analysis_data)
