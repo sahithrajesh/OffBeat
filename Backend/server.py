@@ -414,21 +414,24 @@ async def basic_playlist(
         raise HTTPException(status_code=404, detail="No playlists found.")
 
     # Aggregate all playlists into a single virtual playlist for unified analysis
-    from models import EnrichedPlaylist
-    
+    # Deduplicate tracks across playlists by spotify_id to avoid
+    # duplicate DataFrame indices in the analysis pipeline.
+    seen_ids: set[str] = set()
+    unique_tracks: list[EnrichedTrack] = []
+    for pl in enriched:
+        for t in (pl.tracks or []):
+            if t.spotify_id not in seen_ids:
+                seen_ids.add(t.spotify_id)
+                unique_tracks.append(t)
+
     aggregated_playlist = EnrichedPlaylist(
         spotify_id="aggregated",
         name="Aggregated Playlists",
-        tracks=[],
-        total_tracks=0,
+        tracks=unique_tracks,
+        total_tracks=len(unique_tracks),
     )
-    
-    for pl in enriched:
-        aggregated_playlist.tracks.extend(pl.tracks or [])
-    aggregated_playlist.total_tracks = len(aggregated_playlist.tracks)
 
     # Run analysis once on the aggregated playlist (much faster than per-playlist)
-    from analysis import run_playlist_analysis
     analysis = run_playlist_analysis(aggregated_playlist, use_cache=False)
     
     # Convert to the dict format get_cluster_recommendations expects
