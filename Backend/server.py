@@ -414,6 +414,8 @@ async def basic_playlist(
         raise HTTPException(status_code=404, detail="No playlists found.")
 
     # Aggregate all playlists into a single virtual playlist for unified analysis
+    from models import EnrichedPlaylist
+    
     aggregated_playlist = EnrichedPlaylist(
         spotify_id="aggregated",
         name="Aggregated Playlists",
@@ -426,6 +428,7 @@ async def basic_playlist(
     aggregated_playlist.total_tracks = len(aggregated_playlist.tracks)
 
     # Run analysis once on the aggregated playlist (much faster than per-playlist)
+    from analysis import run_playlist_analysis
     analysis = run_playlist_analysis(aggregated_playlist, use_cache=False)
     
     # Convert to the dict format get_cluster_recommendations expects
