@@ -661,15 +661,14 @@ function BasicRecommendationsView({ data, selectedTrackIds, onToggleTrack }: { d
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Compare View — side-by-side playlist comparison
+// Compare View — comprehensive multi-playlist comparison
 // ═══════════════════════════════════════════════════════════════════════════
 function CompareView({ data, selectedTrackIds, onToggleTrack }: { data: AnalysisResult } & TrackSelectionProps) {
   if (data.playlists.length < 2) {
     return <AnalysisView data={data} selectedTrackIds={selectedTrackIds} onToggleTrack={onToggleTrack} />;
   }
 
-  const p1 = data.playlists[0];
-  const p2 = data.playlists[1];
+  const playlists = data.playlists;
 
   // Compute average audio features per playlist
   function avgAudio(p: AnalysisPlaylist): AudioMeans {
@@ -683,59 +682,50 @@ function CompareView({ data, selectedTrackIds, onToggleTrack }: { data: Analysis
     return avg as AudioMeans;
   }
 
-  const avg1 = avgAudio(p1);
-  const avg2 = avgAudio(p2);
+  const averages = playlists.map(avgAudio);
   const features = Object.keys(AUDIO_FEATURE_META) as (keyof AudioMeans)[];
 
-  // Shared clusters
-  const clusters1 = new Set(Object.keys(p1.clusters));
-  const clusters2 = new Set(Object.keys(p2.clusters));
-  const shared = [...clusters1].filter((c) => clusters2.has(c));
-  const unique1 = [...clusters1].filter((c) => !clusters2.has(c));
-  const unique2 = [...clusters2].filter((c) => !clusters1.has(c));
+  // Collect all unique clusters across all playlists
+  const allClusters = new Set<string>();
+  playlists.forEach((p) => {
+    Object.keys(p.clusters).forEach((c) => allClusters.add(c));
+  });
+  const clusterArray = Array.from(allClusters);
+
+  // For each cluster, show which playlists contain it
+  const clusterPresence: Record<string, boolean[]> = {};
+  clusterArray.forEach((cluster) => {
+    clusterPresence[cluster] = playlists.map((p) => cluster in p.clusters);
+  });
 
   return (
     <div className="space-y-6 sm:space-y-10 animate-in fade-in duration-700">
-      {/* Header row */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-6">
-        <div className="bg-brand-cyan/5 border border-brand-cyan/20 p-4 sm:p-5 rounded-xl">
-          <h3 className="text-sm sm:text-base font-bold text-brand-cyan truncate">{p1.playlist_name}</h3>
-          <p className="text-xs text-brand-teal/50 mt-1">{p1.summary.num_eligible} tracks · {Object.keys(p1.clusters).length} clusters</p>
-        </div>
-        <div className="bg-brand-magenta/5 border border-brand-magenta/20 p-4 sm:p-5 rounded-xl">
-          <h3 className="text-sm sm:text-base font-bold text-brand-magenta truncate">{p2.playlist_name}</h3>
-          <p className="text-xs text-brand-teal/50 mt-1">{p2.summary.num_eligible} tracks · {Object.keys(p2.clusters).length} clusters</p>
-        </div>
-      </div>
-
-      {/* Feature comparison */}
-      <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 sm:p-6">
-        <h4 className="text-sm font-semibold text-white mb-4">Audio Feature Comparison</h4>
-        <div className="space-y-4">
-          {features.map((feat) => {
-            const meta = AUDIO_FEATURE_META[feat];
-            const v1 = avg1[feat];
-            const v2 = avg2[feat];
-            const formatVal = meta.unit === '%' ? (v: number) => `${(v * 100).toFixed(0)}%`
-              : meta.unit === 'BPM' ? (v: number) => `${v.toFixed(0)}`
-              : (v: number) => `${v.toFixed(1)}`;
-            const pct = (v: number) => meta.unit === 'dB'
-              ? ((v - (-20)) / 20) * 100
-              : meta.unit === 'BPM'
-                ? ((v - 60) / 140) * 100
-                : v * 100;
+      {/* Playlist overview cards */}
+      <div>
+        <h3 className="text-lg sm:text-xl font-bold text-white mb-4">Playlists Overview</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+          {playlists.map((p, i) => {
+            const c = CLUSTER_COLORS[i % CLUSTER_COLORS.length];
             return (
-              <div key={feat}>
-                <div className="flex justify-between text-[11px] mb-1.5">
-                  <span className="text-brand-lavender/70">{meta.label}</span>
-                  <div className="flex gap-3">
-                    <span className="text-brand-cyan font-mono">{formatVal(v1)}</span>
-                    <span className="text-brand-magenta font-mono">{formatVal(v2)}</span>
+              <div key={p.playlist_id} className={`border rounded-xl p-4 sm:p-5 ${c.bg} ${c.border}`}>
+                <h4 className={`text-sm sm:text-base font-bold ${c.text} truncate mb-3`}>{p.playlist_name}</h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-white/60">Total Tracks</span>
+                    <span className="text-white font-semibold">{p.summary.num_tracks}</span>
                   </div>
-                </div>
-                <div className="relative h-2 rounded-full bg-white/5 overflow-hidden">
-                  <div className="absolute inset-y-0 left-0 bg-brand-cyan/60 rounded-full" style={{ width: `${Math.min(100, pct(v1))}%` }} />
-                  <div className="absolute inset-y-0 left-0 bg-brand-magenta/40 rounded-full h-1 top-0.5" style={{ width: `${Math.min(100, pct(v2))}%` }} />
+                  <div className="flex justify-between text-xs">
+                    <span className="text-white/60">Analyzed</span>
+                    <span className="text-white font-semibold">{p.summary.num_eligible}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-white/60">Clusters</span>
+                    <span className="text-white font-semibold">{Object.keys(p.clusters).length}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-white/60">Anomalies</span>
+                    <span className="text-red-400 font-semibold">{p.summary.num_anomalies}</span>
+                  </div>
                 </div>
               </div>
             );
@@ -743,46 +733,132 @@ function CompareView({ data, selectedTrackIds, onToggleTrack }: { data: Analysis
         </div>
       </div>
 
-      {/* Cluster overlap */}
-      <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 sm:p-6">
-        <h4 className="text-sm font-semibold text-white mb-4">Cluster Overlap</h4>
-        <div className="space-y-3">
-          {shared.length > 0 && (
-            <div>
-              <p className="text-[11px] text-green-400/70 uppercase tracking-wider font-semibold mb-2">Shared ({shared.length})</p>
-              <div className="flex flex-wrap gap-2">
-                {shared.map((c) => (
-                  <Badge key={c} variant="outline" className="border-green-500/20 text-green-400/80 bg-green-500/5 capitalize text-xs">
-                    {c.replace(/_/g, ' ')}
-                  </Badge>
-                ))}
-              </div>
+      {/* Audio Features Comparison Table */}
+      <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 sm:p-6 overflow-x-auto">
+        <h4 className="text-sm font-semibold text-white mb-4">Audio Features Comparison</h4>
+        <div className="min-w-max">
+          <div className="grid gap-4" style={{ gridTemplateColumns: `200px repeat(${playlists.length}, 1fr)` }}>
+            {/* Header row */}
+            <div className="text-xs font-semibold text-brand-teal/60 uppercase tracking-wider pb-3 border-b border-white/5">
+              Feature
             </div>
-          )}
-          {unique1.length > 0 && (
-            <div>
-              <p className="text-[11px] text-brand-cyan/70 uppercase tracking-wider font-semibold mb-2">Only in {p1.playlist_name} ({unique1.length})</p>
-              <div className="flex flex-wrap gap-2">
-                {unique1.map((c) => (
-                  <Badge key={c} variant="outline" className="border-brand-cyan/20 text-brand-cyan/80 bg-brand-cyan/5 capitalize text-xs">
-                    {c.replace(/_/g, ' ')}
-                  </Badge>
-                ))}
-              </div>
+            {playlists.map((p, i) => {
+              const c = CLUSTER_COLORS[i % CLUSTER_COLORS.length];
+              return (
+                <div key={p.playlist_id} className={`text-xs font-semibold ${c.text} uppercase tracking-wider pb-3 border-b border-white/5 truncate`}>
+                  {p.playlist_name}
+                </div>
+              );
+            })}
+
+            {/* Feature rows */}
+            {features.map((feat) => {
+              const meta = AUDIO_FEATURE_META[feat];
+              const formatVal = meta.unit === '%' ? (v: number) => `${(v * 100).toFixed(0)}%`
+                : meta.unit === 'BPM' ? (v: number) => `${v.toFixed(0)}`
+                : (v: number) => `${v.toFixed(1)}`;
+
+              return (
+                <div key={feat} className="contents">
+                  <div className="text-[11px] text-brand-teal/70 py-2">{meta.label}</div>
+                  {averages.map((avg, i) => {
+                    const c = CLUSTER_COLORS[i % CLUSTER_COLORS.length];
+                    return (
+                      <div key={`${feat}-${i}`} className={`text-[11px] font-mono py-2 px-2 rounded ${c.bg}`}>
+                        {formatVal(avg[feat])}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Cluster Presence Matrix */}
+      <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 sm:p-6 overflow-x-auto">
+        <h4 className="text-sm font-semibold text-white mb-4">Cluster Distribution Across Playlists</h4>
+        <div className="min-w-max">
+          <div className="grid gap-2" style={{ gridTemplateColumns: `180px repeat(${playlists.length}, 80px)` }}>
+            {/* Header */}
+            <div className="text-xs font-semibold text-brand-teal/60 uppercase tracking-wider pb-2 border-b border-white/5">
+              Cluster
             </div>
-          )}
-          {unique2.length > 0 && (
-            <div>
-              <p className="text-[11px] text-brand-magenta/70 uppercase tracking-wider font-semibold mb-2">Only in {p2.playlist_name} ({unique2.length})</p>
-              <div className="flex flex-wrap gap-2">
-                {unique2.map((c) => (
-                  <Badge key={c} variant="outline" className="border-brand-magenta/20 text-brand-magenta/80 bg-brand-magenta/5 capitalize text-xs">
-                    {c.replace(/_/g, ' ')}
-                  </Badge>
-                ))}
+            {playlists.map((p, i) => {
+              const c = CLUSTER_COLORS[i % CLUSTER_COLORS.length];
+              return (
+                <div
+                  key={p.playlist_id}
+                  className={`text-xs font-semibold ${c.text} uppercase tracking-wider pb-2 border-b border-white/5 text-center truncate`}
+                  title={p.playlist_name}
+                >
+                  {p.playlist_name.split(' ')[0]}
+                </div>
+              );
+            })}
+
+            {/* Cluster rows */}
+            {clusterArray.map((clusterName) => (
+              <div key={clusterName} className="contents">
+                <div className="text-[11px] text-white py-2 truncate capitalize" title={clusterName}>
+                  {clusterName.replace(/_/g, ' ')}
+                </div>
+                {clusterPresence[clusterName].map((present, i) => {
+                  const c = CLUSTER_COLORS[i % CLUSTER_COLORS.length];
+                  const cluster = playlists[i].clusters[clusterName];
+                  return (
+                    <div
+                      key={`${clusterName}-${i}`}
+                      className={`flex items-center justify-center py-2 rounded text-xs font-semibold ${
+                        present ? `${c.bg} ${c.text}` : 'bg-white/[0.02] text-brand-teal/20'
+                      }`}
+                      title={present ? `${cluster?.size || 0} tracks` : 'Not present'}
+                    >
+                      {present ? cluster?.size || '—' : '—'}
+                    </div>
+                  );
+                })}
               </div>
-            </div>
-          )}
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Shared vs Unique Clusters */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+        {/* Clusters shared by all */}
+        <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 sm:p-6">
+          <h4 className="text-sm font-semibold text-green-400 mb-3">Present in All Playlists</h4>
+          <div className="flex flex-wrap gap-2">
+            {clusterArray.filter((c) => clusterPresence[c].every((p) => p)).map((cluster) => (
+              <Badge key={cluster} variant="outline" className="border-green-500/20 text-green-400/80 bg-green-500/5 capitalize text-xs">
+                {cluster.replace(/_/g, ' ')}
+              </Badge>
+            ))}
+            {clusterArray.filter((c) => clusterPresence[c].every((p) => p)).length === 0 && (
+              <p className="text-[11px] text-brand-teal/40">No clusters shared by all</p>
+            )}
+          </div>
+        </div>
+
+        {/* Unique clusters */}
+        <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 sm:p-6">
+          <h4 className="text-sm font-semibold text-brand-magenta mb-3">Unique Clusters</h4>
+          <div className="flex flex-wrap gap-2">
+            {clusterArray.filter((c) => clusterPresence[c].filter((p) => p).length === 1).map((cluster) => {
+              const playlistIdx = clusterPresence[cluster].indexOf(true);
+              const c = CLUSTER_COLORS[playlistIdx % CLUSTER_COLORS.length];
+              return (
+                <Badge key={cluster} variant="outline" className={`${c.border} ${c.text} bg-white/[0.02] capitalize text-xs`}>
+                  {cluster.replace(/_/g, ' ')}
+                </Badge>
+              );
+            })}
+            {clusterArray.filter((c) => clusterPresence[c].filter((p) => p).length === 1).length === 0 && (
+              <p className="text-[11px] text-brand-teal/40">No unique clusters</p>
+            )}
+          </div>
         </div>
       </div>
     </div>
