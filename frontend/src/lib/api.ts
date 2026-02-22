@@ -104,12 +104,9 @@ export function createPlaylist(tracks: EnrichedTrack[]): Promise<unknown> {
 // Analysis & recommendations
 // ---------------------------------------------------------------------------
 
-/** POST /analysis — run Sphinx analysis on selected playlists */
-export function runAnalysis(playlists: Playlist[]): Promise<Record<string, unknown>> {
-  return apiFetch<Record<string, unknown>>("/analysis", {
-    method: "POST",
-    body: JSON.stringify(playlists),
-  });
+/** GET /analysis — fetch the pre-computed playlist analysis insights */
+export function fetchAnalysis(): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>("/analysis");
 }
 
 /** POST /compare — compare a playlist against analysis data */

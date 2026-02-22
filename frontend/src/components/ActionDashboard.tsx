@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { ArrowRight, Loader2, AlertTriangle, Menu, X, ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight, Music2 } from 'lucide-react';
 import type { Playlist, EnrichedPlaylist } from '@/lib/api';
 import {
-  runAnalysis,
+  fetchAnalysis,
   comparePlaylist,
   basicRecommendations,
   anomalyRecommendations,
@@ -661,14 +661,15 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
     setError(null);
     setResult(null);
     try {
+      // Always fetch the pre-computed analysis from the backend first
+      const analysisData = await fetchAnalysis();
+
       switch (currentAction) {
         case 'analysis': {
-          const data = await runAnalysis(selectedPlaylists);
-          setResult(data);
+          setResult(analysisData);
           break;
         }
         case 'compare': {
-          const analysisData = await runAnalysis(selectedPlaylists);
           if (selectedPlaylists.length > 0) {
             const cmp = await comparePlaylist(analysisData, selectedPlaylists[0]);
             setResult(cmp);
@@ -678,13 +679,11 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
           break;
         }
         case 'basic': {
-          const analysisData = await runAnalysis(selectedPlaylists);
           const rec = await basicRecommendations(analysisData);
           setResult(rec);
           break;
         }
         case 'anomaly': {
-          const analysisData = await runAnalysis(selectedPlaylists);
           const rec = await anomalyRecommendations(analysisData);
           setResult(rec);
           break;
