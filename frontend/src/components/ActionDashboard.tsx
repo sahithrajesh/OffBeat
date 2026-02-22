@@ -156,6 +156,129 @@ function AnomalyCard({ anomaly, selectedTrackIds, onToggleTrack }: { anomaly: An
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Cluster Card — extracted so useRef is at component top-level (Rules of Hooks)
+// ═══════════════════════════════════════════════════════════════════════════
+interface ClusterCardProps extends TrackSelectionProps {
+  clusterName: string;
+  cluster: import('@/lib/placeholderData').Cluster;
+  colorIndex: number;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+}
+
+function ClusterCard({ clusterName, cluster, colorIndex, isExpanded, onToggleExpand, selectedTrackIds, onToggleTrack }: ClusterCardProps) {
+  const expandedContentRef = useRef<HTMLDivElement>(null);
+  const c = CLUSTER_COLORS[colorIndex % CLUSTER_COLORS.length];
+  const audio = cluster.centroid_features.audio_means;
+  const primaryFeatures: (keyof AudioMeans)[] = ['energy', 'danceability', 'valence', 'acousticness'];
+  const allFeatures = Object.keys(AUDIO_FEATURE_META) as (keyof AudioMeans)[];
+
+  return (
+    <div
+      className={`border rounded-xl sm:rounded-2xl transition-all duration-300 overflow-hidden ${isExpanded ? `${c.bg} ${c.border}` : 'bg-white/[0.02] border-white/5 hover:border-white/10'}`}
+    >
+      {/* Card header */}
+      <button
+        className="w-full text-left p-4 sm:p-5 flex items-start justify-between gap-3"
+        onClick={onToggleExpand}
+      >
+        <div className="min-w-0">
+          <h4 className={`text-sm sm:text-base font-bold capitalize ${isExpanded ? c.text : 'text-white'}`}>
+            {clusterName.replace(/_/g, ' ')}
+          </h4>
+          <p className="text-xs text-brand-teal/50 mt-0.5">{cluster.size} tracks · Cluster #{cluster.cluster_id}</p>
+        </div>
+        <div className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${c.bg} ${c.text} ${c.border} border`}>
+          {cluster.size}
+        </div>
+      </button>
+
+      {/* Primary features (always visible) */}
+      <div className="px-4 sm:px-5 pb-3 space-y-2.5">
+        {primaryFeatures.map((feat) => {
+          const meta = AUDIO_FEATURE_META[feat];
+          return <FeatureBar key={feat} label={meta.label} value={audio[feat]} max={meta.max} unit={meta.unit} color={c.bar} />;
+        })}
+      </div>
+
+      {/* Tags */}
+      <div className="px-4 sm:px-5 pb-3 flex flex-wrap gap-1.5">
+        {cluster.centroid_features.top_tags.slice(0, isExpanded ? 8 : 4).map((tag) => (
+          <Badge key={tag} variant="outline" className={`text-[10px] sm:text-[11px] bg-black/20 ${isExpanded ? `${c.border} ${c.text}` : 'border-white/10 text-brand-teal/70'}`}>
+            {tag}
+          </Badge>
+        ))}
+      </div>
+
+      {/* Expanded content with smooth max-height transition */}
+      <div
+        ref={expandedContentRef}
+        className="transition-all duration-300 ease-out overflow-hidden"
+        style={{
+          maxHeight: isExpanded ? `${expandedContentRef.current?.scrollHeight || 0}px` : '0px',
+          opacity: isExpanded ? 1 : 0,
+        }}
+      >
+        <div className="px-4 sm:px-5 pb-4 sm:pb-5 space-y-5">
+          <div className="border-t border-white/5 pt-4">
+            <p className="text-[11px] text-brand-teal/50 uppercase tracking-wider font-semibold mb-3">All Audio Features</p>
+            <div className="space-y-2">
+              {allFeatures.filter(f => !primaryFeatures.includes(f)).map((feat) => {
+                const meta = AUDIO_FEATURE_META[feat];
+                return <FeatureBar key={feat} label={meta.label} value={audio[feat]} max={meta.max} unit={meta.unit} color={c.bar} />;
+              })}
+            </div>
+          </div>
+
+          {/* Tag weights */}
+          <div className="border-t border-white/5 pt-4">
+            <p className="text-[11px] text-brand-teal/50 uppercase tracking-wider font-semibold mb-3">Genre Weights</p>
+            <div className="space-y-1.5">
+              {Object.entries(cluster.centroid_features.tag_weights_top).slice(0, 6).map(([tag, weight]) => (
+                <div key={tag} className="flex items-center gap-2">
+                  <span className="text-[11px] text-brand-teal/70 w-16 truncate">{tag}</span>
+                  <div className="flex-1 h-1 rounded-full bg-white/5 overflow-hidden">
+                    <div className={`h-full rounded-full ${c.bar} opacity-60`} style={{ width: `${(weight as number) * 500}%` }} />
+                  </div>
+                  <span className="text-[10px] font-mono text-brand-teal/40 w-10 text-right">{((weight as number) * 100).toFixed(1)}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Sample tracks */}
+          {cluster.tracks.length > 0 && (
+            <div className="border-t border-white/5 pt-4">
+              <p className="text-[11px] text-brand-teal/50 uppercase tracking-wider font-semibold mb-3">
+                Sample Tracks <span className="text-brand-teal/30">({cluster.tracks.length})</span>
+              </p>
+              <div className="space-y-1">
+                {cluster.tracks.slice(0, 5).map((t) => {
+                  const isSelected = selectedTrackIds.has(t.spotify_id);
+                  return (
+                    <div
+                      key={t.spotify_id}
+                      onClick={() => onToggleTrack(t.spotify_id)}
+                      className={`flex items-center gap-2 py-1.5 px-2 rounded-lg cursor-pointer transition-all duration-200 ${
+                        isSelected ? 'bg-brand-cyan/10 ring-1 ring-brand-cyan/30' : 'hover:bg-white/[0.03]'
+                      }`}
+                    >
+                      <SelectionCheckbox selected={isSelected} />
+                      <span className={`text-xs truncate flex-1 ${isSelected ? 'text-brand-cyan' : 'text-white'}`}>{t.title}</span>
+                      <span className="text-[10px] font-mono text-brand-teal/40">{(t.anomaly_score * 100).toFixed(0)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Analysis Renderer — rich multi-playlist analysis view
 // ═══════════════════════════════════════════════════════════════════════════
 function AnalysisView({ data, selectedTrackIds, onToggleTrack }: { data: AnalysisResult } & TrackSelectionProps) {
@@ -230,120 +353,18 @@ function AnalysisView({ data, selectedTrackIds, onToggleTrack }: { data: Analysi
       <div>
         <h3 className="text-lg sm:text-xl font-bold text-white mb-4 sm:mb-5">Sonic Personas</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-          {Object.entries(playlist.clusters).map(([clusterName, cluster], idx) => {
-            const c = CLUSTER_COLORS[idx % CLUSTER_COLORS.length];
-            const isExpanded = expandedCluster === clusterName;
-            const audio = cluster.centroid_features.audio_means;
-            // Show top features: energy, danceability, valence, tempo, + expand for all
-            const primaryFeatures: (keyof AudioMeans)[] = ['energy', 'danceability', 'valence', 'acousticness'];
-            const allFeatures = Object.keys(AUDIO_FEATURE_META) as (keyof AudioMeans)[];
-            const expandedContentRef = useRef<HTMLDivElement>(null);
-
-            return (
-              <div
-                key={clusterName}
-                className={`border rounded-xl sm:rounded-2xl transition-all duration-300 overflow-hidden ${isExpanded ? `${c.bg} ${c.border}` : 'bg-white/[0.02] border-white/5 hover:border-white/10'}`}
-              >
-                {/* Card header */}
-                <button
-                  className="w-full text-left p-4 sm:p-5 flex items-start justify-between gap-3"
-                  onClick={() => setExpandedCluster(isExpanded ? null : clusterName)}
-                >
-                  <div className="min-w-0">
-                    <h4 className={`text-sm sm:text-base font-bold capitalize ${isExpanded ? c.text : 'text-white'}`}>
-                      {clusterName.replace(/_/g, ' ')}
-                    </h4>
-                    <p className="text-xs text-brand-teal/50 mt-0.5">{cluster.size} tracks · Cluster #{cluster.cluster_id}</p>
-                  </div>
-                  <div className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${c.bg} ${c.text} ${c.border} border`}>
-                    {cluster.size}
-                  </div>
-                </button>
-
-                {/* Primary features (always visible) */}
-                <div className="px-4 sm:px-5 pb-3 space-y-2.5">
-                  {primaryFeatures.map((feat) => {
-                    const meta = AUDIO_FEATURE_META[feat];
-                    return <FeatureBar key={feat} label={meta.label} value={audio[feat]} max={meta.max} unit={meta.unit} color={c.bar} />;
-                  })}
-                </div>
-
-                {/* Tags */}
-                <div className="px-4 sm:px-5 pb-3 flex flex-wrap gap-1.5">
-                  {cluster.centroid_features.top_tags.slice(0, isExpanded ? 8 : 4).map((tag) => (
-                    <Badge key={tag} variant="outline" className={`text-[10px] sm:text-[11px] bg-black/20 ${isExpanded ? `${c.border} ${c.text}` : 'border-white/10 text-brand-teal/70'}`}>
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
-
-                {/* Expanded content with smooth max-height transition */}
-                <div
-                  ref={expandedContentRef}
-                  className="transition-all duration-300 ease-out overflow-hidden"
-                  style={{
-                    maxHeight: isExpanded ? `${expandedContentRef.current?.scrollHeight || 0}px` : '0px',
-                    opacity: isExpanded ? 1 : 0,
-                  }}
-                >
-                  <div className="px-4 sm:px-5 pb-4 sm:pb-5 space-y-5">
-                    <div className="border-t border-white/5 pt-4">
-                      <p className="text-[11px] text-brand-teal/50 uppercase tracking-wider font-semibold mb-3">All Audio Features</p>
-                      <div className="space-y-2">
-                        {allFeatures.filter(f => !primaryFeatures.includes(f)).map((feat) => {
-                          const meta = AUDIO_FEATURE_META[feat];
-                          return <FeatureBar key={feat} label={meta.label} value={audio[feat]} max={meta.max} unit={meta.unit} color={c.bar} />;
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Tag weights */}
-                    <div className="border-t border-white/5 pt-4">
-                      <p className="text-[11px] text-brand-teal/50 uppercase tracking-wider font-semibold mb-3">Genre Weights</p>
-                      <div className="space-y-1.5">
-                        {Object.entries(cluster.centroid_features.tag_weights_top).slice(0, 6).map(([tag, weight]) => (
-                          <div key={tag} className="flex items-center gap-2">
-                            <span className="text-[11px] text-brand-teal/70 w-16 truncate">{tag}</span>
-                            <div className="flex-1 h-1 rounded-full bg-white/5 overflow-hidden">
-                              <div className={`h-full rounded-full ${c.bar} opacity-60`} style={{ width: `${(weight as number) * 500}%` }} />
-                            </div>
-                            <span className="text-[10px] font-mono text-brand-teal/40 w-10 text-right">{((weight as number) * 100).toFixed(1)}%</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Sample tracks */}
-                    {cluster.tracks.length > 0 && (
-                      <div className="border-t border-white/5 pt-4">
-                        <p className="text-[11px] text-brand-teal/50 uppercase tracking-wider font-semibold mb-3">
-                          Sample Tracks <span className="text-brand-teal/30">({cluster.tracks.length})</span>
-                        </p>
-                        <div className="space-y-1">
-                          {cluster.tracks.slice(0, 5).map((t) => {
-                            const isSelected = selectedTrackIds.has(t.spotify_id);
-                            return (
-                              <div
-                                key={t.spotify_id}
-                                onClick={() => onToggleTrack(t.spotify_id)}
-                                className={`flex items-center gap-2 py-1.5 px-2 rounded-lg cursor-pointer transition-all duration-200 ${
-                                  isSelected ? 'bg-brand-cyan/10 ring-1 ring-brand-cyan/30' : 'hover:bg-white/[0.03]'
-                                }`}
-                              >
-                                <SelectionCheckbox selected={isSelected} />
-                                <span className={`text-xs truncate flex-1 ${isSelected ? 'text-brand-cyan' : 'text-white'}`}>{t.title}</span>
-                                <span className="text-[10px] font-mono text-brand-teal/40">{(t.anomaly_score * 100).toFixed(0)}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          {Object.entries(playlist.clusters).map(([clusterName, cluster], idx) => (
+            <ClusterCard
+              key={clusterName}
+              clusterName={clusterName}
+              cluster={cluster}
+              colorIndex={idx}
+              isExpanded={expandedCluster === clusterName}
+              onToggleExpand={() => setExpandedCluster(expandedCluster === clusterName ? null : clusterName)}
+              selectedTrackIds={selectedTrackIds}
+              onToggleTrack={onToggleTrack}
+            />
+          ))}
         </div>
       </div>
 
