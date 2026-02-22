@@ -164,3 +164,47 @@ async def get_playlist_tracks(
                 url = data.get("next")
 
     return tracks
+
+async def create_new_playlist(
+    token: str,
+    user_id: str,
+    name: str,
+    description: str = "Created by OffBeat AI"
+) -> str:
+    """Create a new empty playlist for the user and return its Spotify ID."""
+    url = f"{SPOTIFY_API}/users/{user_id}/playlists"
+    payload = {
+        "name": name,
+        "description": description,
+        "public": False
+    }
+    
+    async with ClientSession() as session:
+        async with session.post(url, headers=_auth_header(token), json=payload) as resp:
+            if resp.status not in (200, 201):
+                error_detail = await resp.text()
+                logger.error(f"[create_playlist] HTTP {resp.status}: {error_detail}")
+                resp.raise_for_status()
+            
+            data = await resp.json()
+            return data["id"]
+
+
+async def add_tracks_to_playlist(
+    token: str,
+    playlist_id: str,
+    track_uris: list[str]
+):
+    """Add tracks to a playlist, chunking into batches of 100 (Spotify API limit)."""
+    url = f"{SPOTIFY_API}/playlists/{playlist_id}/tracks"
+    
+    async with ClientSession() as session:
+        for i in range(0, len(track_uris), 100):
+            chunk = track_uris[i:i + 100]
+            payload = {"uris": chunk}
+            
+            async with session.post(url, headers=_auth_header(token), json=payload) as resp:
+                if resp.status not in (200, 201):
+                    error_detail = await resp.text()
+                    logger.error(f"[add_tracks] HTTP {resp.status}: {error_detail}")
+                    resp.raise_for_status()
