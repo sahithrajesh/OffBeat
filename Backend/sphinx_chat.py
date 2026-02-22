@@ -88,25 +88,35 @@ def _analysis_output_to_serialisable(ao: AnalysisOutput) -> dict:
 def _build_data_cell(
     enriched: List[EnrichedPlaylist],
     analyses: Optional[List[AnalysisOutput]] = None,
+    data_dir: Optional[Path] = None,
 ) -> str:
-    """Python code string that injects analysis + enriched data as dicts."""
-    ep_data = json.dumps([asdict(e) for e in enriched], default=str)
+    """Python code string that injects analysis + enriched data as dicts.
+
+    Writes JSON to sidecar files to avoid triple-quote escaping issues.
+    """
+    if data_dir is None:
+        data_dir = _SESSIONS_DIR
+
+    ep_path = data_dir / "enriched.json"
+    ep_path.write_text(json.dumps([asdict(e) for e in enriched], default=str))
+
     lines = [
         "# ── OffBeat analysis data (auto-injected) ──",
-        "import json, warnings",
+        "import json, warnings, pathlib",
         "warnings.filterwarnings('ignore')",
         "",
-        f"enriched_playlists = json.loads('''{ep_data}''')",
+        f"enriched_playlists = json.loads(pathlib.Path(r'{ep_path}').read_text())",
         "",
     ]
 
     if analyses:
-        an_data = json.dumps(
+        an_path = data_dir / "analysis.json"
+        an_path.write_text(json.dumps(
             [_analysis_output_to_serialisable(a) for a in analyses],
             default=str,
-        )
+        ))
         lines += [
-            f"analysis_results = json.loads('''{an_data}''')",
+            f"analysis_results = json.loads(pathlib.Path(r'{an_path}').read_text())",
             "",
         ]
 
@@ -183,7 +193,7 @@ def create_session(
 
     nb = _new_notebook()
     nb["cells"].append(_markdown_cell(_build_context_markdown(enriched, analyses)))
-    nb["cells"].append(_code_cell(_build_data_cell(enriched, analyses)))
+    nb["cells"].append(_code_cell(_build_data_cell(enriched, analyses, data_dir=user_dir)))
 
     nb_path = user_dir / "session.ipynb"
     nb_path.write_text(json.dumps(nb, indent=1))
@@ -254,8 +264,6 @@ async def run_sphinx(
         "--no-memory-read",
         "--no-memory-write",
         "--no-web-search",
-        "--no-file-search",
-        "--no-package-installation",
     ]
 
     env = {**os.environ}
@@ -279,12 +287,14 @@ async def run_sphinx(
         stderr_text = stderr.decode(errors="replace")
 
         if proc.returncode != 0:
-            logger.error(f"[sphinx] CLI failed (rc={proc.returncode}): {stderr_text[:500]}")
+            combined = (stderr_text or stdout_text)[:500]
+            logger.error(f"[sphinx] CLI failed (rc={proc.returncode}) stderr: {stderr_text[:300]}")
+            logger.error(f"[sphinx] CLI stdout: {stdout_text[:300]}")
             return {
                 "text": f"Sphinx encountered an error. Please try rephrasing your question.",
                 "images": [],
                 "code": [],
-                "error": stderr_text[:500],
+                "error": combined,
             }
 
         logger.info(f"[sphinx] CLI completed, parsing notebook…")
