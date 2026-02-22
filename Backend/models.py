@@ -68,7 +68,19 @@ class EnrichedTrack:
 
 @dataclass
 class Playlist:
-    """A Spotify playlist represented as a collection of EnrichedTracks."""
+    """Basic Spotify playlist metadata (without tracks)."""
+
+    spotify_id: str
+    name: str
+    total_tracks: int
+    owner: str
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+
+
+@dataclass
+class EnrichedPlaylist:
+    """A playlist represented as a collection of EnrichedTracks."""
 
     spotify_id: str
     name: str

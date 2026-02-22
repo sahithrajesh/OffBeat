@@ -1,18 +1,19 @@
-"""aiohttp API server with Spotify OAuth endpoints.
+"""FastAPI server with Spotify OAuth endpoints.
 
 Endpoints
 ---------
 GET  /auth/login     → redirect user to Spotify
 GET  /auth/callback  → handle Spotify redirect, issue JWT, redirect to frontend
 GET  /auth/me        → return current user info (requires JWT)
-POST /auth/logout    → (optional) frontend just discards its JWT
 
-All other API routes should use the ``require_auth`` middleware/helper to
-extract the Spotify user ID from the JWT.
+GET  /api/playlists  → fetch the user's Spotify playlists (requires JWT)
+
+All protected routes use the ``require_auth`` dependency to extract the
+Spotify user ID from the JWT.
 
 Run with::
 
-    python server.py
+    uvicorn server:app --host 0.0.0.0 --port 8888 --reload
 """
 
 from __future__ import annotations
@@ -20,12 +21,15 @@ from __future__ import annotations
 import secrets
 from typing import Optional
 
-from aiohttp import web
-from aiohttp.web import middleware
-import aiohttp_cors
+from fastapi import FastAPI, Depends, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+import uvicorn
 
 import config
+from models import Playlist, EnrichedTrack, EnrichedPlaylist
 from spotify_auth import build_authorize_url, exchange_code, get_spotify_user
+from spotify_client import get_user_playlists
 from pocketbase_client import upsert_user, get_valid_access_token, get_user
 from session import create_session_token, verify_session_token
 
@@ -35,63 +39,68 @@ _pending_states: set[str] = set()
 
 
 # ---------------------------------------------------------------------------
-# Auth helpers
+# FastAPI app
 # ---------------------------------------------------------------------------
 
-def _extract_token(request: web.Request) -> Optional[str]:
-    """Pull the JWT from the Authorization header."""
-    auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer "):
-        return auth[7:]
-    return None
+app = FastAPI(title="Hacklytics 2026 API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[config.FRONTEND_URL],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
-def _get_spotify_id(request: web.Request) -> Optional[str]:
-    """Validate the JWT and return the spotify_id, or None."""
-    token = _extract_token(request)
-    if not token:
-        return None
-    payload = verify_session_token(token)
-    return payload["sub"] if payload else None
+# ---------------------------------------------------------------------------
+# Auth dependency
+# ---------------------------------------------------------------------------
 
+async def require_auth(request: Request) -> str:
+    """FastAPI dependency that validates the JWT and returns the spotify_id.
 
-async def require_auth(request: web.Request) -> str:
-    """Helper that raises 401 if the request is not authenticated.
-
-    Returns the spotify_id on success.
+    Raises 401 if the token is missing or invalid.
     """
-    spotify_id = _get_spotify_id(request)
-    if not spotify_id:
-        raise web.HTTPUnauthorized(text="Missing or invalid session token")
-    return spotify_id
+    auth = request.headers.get("Authorization", "")
+    token: Optional[str] = auth[7:] if auth.startswith("Bearer ") else None
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing or invalid session token")
+    payload = verify_session_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Missing or invalid session token")
+    return payload["sub"]
 
 
 # ---------------------------------------------------------------------------
 # Auth routes
 # ---------------------------------------------------------------------------
 
-async def login(request: web.Request) -> web.Response:
-    """GET /auth/login — redirect to Spotify authorize page."""
+@app.get("/auth/login")
+async def login():
+    """Redirect to Spotify authorize page."""
     state = secrets.token_urlsafe(16)
     _pending_states.add(state)
     url = build_authorize_url(state)
-    raise web.HTTPFound(url)
+    return RedirectResponse(url)
 
 
-async def callback(request: web.Request) -> web.Response:
-    """GET /auth/callback — Spotify redirects here after user approves."""
-    error = request.query.get("error")
+@app.get("/auth/callback")
+async def callback(
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+):
+    """Handle Spotify redirect after user approves."""
     if error:
-        raise web.HTTPBadRequest(text=f"Spotify auth error: {error}")
+        raise HTTPException(status_code=400, detail=f"Spotify auth error: {error}")
 
-    state = request.query.get("state", "")
-    if state not in _pending_states:
-        raise web.HTTPBadRequest(text="Invalid state parameter")
+    if not state or state not in _pending_states:
+        raise HTTPException(status_code=400, detail="Invalid state parameter")
     _pending_states.discard(state)
 
-    code = request.query.get("code", "")
     if not code:
-        raise web.HTTPBadRequest(text="Missing authorization code")
+        raise HTTPException(status_code=400, detail="Missing authorization code")
 
     # Exchange code for tokens
     token_data = await exchange_code(code)
@@ -119,85 +128,118 @@ async def callback(request: web.Request) -> web.Response:
     jwt_token = create_session_token(spotify_id, display_name)
 
     # Redirect to frontend with the JWT as a query param.
-    # The frontend should grab it from the URL, store it, and clear the URL.
     redirect_url = f"{config.FRONTEND_URL}/auth/callback?token={jwt_token}"
-    raise web.HTTPFound(redirect_url)
+    return RedirectResponse(redirect_url)
 
 
-async def me(request: web.Request) -> web.Response:
-    """GET /auth/me — return current user profile (requires JWT)."""
-    spotify_id = await require_auth(request)
+@app.get("/auth/me")
+async def me(spotify_id: str = Depends(require_auth)):
+    """Return current user profile (requires JWT)."""
     user = await get_user(spotify_id)
     if not user:
-        raise web.HTTPNotFound(text="User not found")
+        raise HTTPException(status_code=404, detail="User not found")
 
-    return web.json_response(
-        {
-            "spotify_id": user["spotify_id"],
-            "display_name": user["display_name"],
-            "email": user.get("email", ""),
-            "avatar_url": user.get("avatar_url", ""),
-        }
-    )
+    return {
+        "spotify_id": user["spotify_id"],
+        "display_name": user["display_name"],
+        "email": user.get("email", ""),
+        "avatar_url": user.get("avatar_url", ""),
+    }
 
 
 # ---------------------------------------------------------------------------
-# Example protected route
+# API routes
 # ---------------------------------------------------------------------------
 
-async def my_playlists(request: web.Request) -> web.Response:
-    """GET /api/playlists — fetch the user's Spotify playlists."""
-    from spotify_client import get_user_playlists
-
-    spotify_id = await require_auth(request)
+@app.get("/api/playlists", response_model=list[Playlist])
+async def my_playlists(spotify_id: str = Depends(require_auth)):
+    """Fetch the user's Spotify playlists."""
     access_token = await get_valid_access_token(spotify_id)  # auto-refreshes
     playlists = await get_user_playlists(access_token)
 
-    return web.json_response(
-        [
-            {
-                "id": p["id"],
-                "name": p["name"],
-                "total_tracks": p.get("tracks", {}).get("total", 0),
-                "owner": p.get("owner", {}).get("display_name", ""),
-            }
-            for p in playlists
-        ]
-    )
+    return [
+        Playlist(
+            spotify_id=p["id"],
+            name=p["name"],
+            total_tracks=p.get("tracks", {}).get("total", 0),
+            owner=p.get("owner", {}).get("display_name", ""),
+            description=p.get("description"),
+            image_url=p.get("images", [{}])[0].get("url") if p.get("images") else None,
+        )
+        for p in playlists
+    ]
+
+
+@app.post("/api/create")
+async def create_playlist(
+    tracks: list[EnrichedTrack],
+    spotify_id: str = Depends(require_auth),
+):
+    """Create a Spotify playlist from a list of enriched tracks."""
+    # TODO: Implement playlist creation logic
+    # - Get access token
+    # - Create new playlist via Spotify API
+    # - Add tracks to playlist
+    # - Return playlist info
+    raise HTTPException(status_code=501, detail="Not implemented")
+
+
+@app.post("/api/analysis")
+async def analyze_playlists(
+    playlists: list[Playlist],
+    spotify_id: str = Depends(require_auth),
+):
+    """Analyze playlists and return analysis data."""
+    # TODO: Implement analysis logic
+    # - Process playlist data
+    # - Generate analysis metrics
+    # - Return unmodeled data (dict)
+    raise HTTPException(status_code=501, detail="Not implemented")
+
+
+@app.post("/api/compare")
+async def compare_playlist(
+    analysis_data: dict,
+    playlist: Playlist,
+    spotify_id: str = Depends(require_auth),
+):
+    """Compare a playlist against analysis data."""
+    # TODO: Implement comparison logic
+    # - Process analysis data and playlist
+    # - Generate comparison metrics
+    # - Return unmodeled data (dict)
+    raise HTTPException(status_code=501, detail="Not implemented")
+
+
+@app.post("/api/basic", response_model=EnrichedPlaylist)
+async def basic_playlist(
+    analysis_data: dict,
+    spotify_id: str = Depends(require_auth),
+):
+    """Generate a basic playlist from analysis data."""
+    # TODO: Implement basic playlist generation logic
+    # - Process analysis data
+    # - Select tracks based on basic criteria
+    # - Return EnrichedPlaylist
+    raise HTTPException(status_code=501, detail="Not implemented")
+
+
+@app.post("/api/anomaly", response_model=EnrichedPlaylist)
+async def anomaly_playlist(
+    analysis_data: dict,
+    spotify_id: str = Depends(require_auth),
+):
+    """Generate an anomaly-based playlist from analysis data."""
+    # TODO: Implement anomaly detection logic
+    # - Process analysis data
+    # - Detect anomalous tracks
+    # - Return EnrichedPlaylist
+    raise HTTPException(status_code=501, detail="Not implemented")
 
 
 # ---------------------------------------------------------------------------
-# App factory
+# Entry point
 # ---------------------------------------------------------------------------
-
-def create_app() -> web.Application:
-    app = web.Application()
-
-    # Auth routes
-    app.router.add_get("/auth/login", login)
-    app.router.add_get("/auth/callback", callback)
-    app.router.add_get("/auth/me", me)
-
-    # API routes
-    app.router.add_get("/api/playlists", my_playlists)
-
-    # CORS – allow the frontend origin
-    cors = aiohttp_cors.setup(
-        app,
-        defaults={
-            config.FRONTEND_URL: aiohttp_cors.ResourceOptions(
-                allow_credentials=True,
-                expose_headers="*",
-                allow_headers="*",
-                allow_methods="*",
-            )
-        },
-    )
-    for route in list(app.router.routes()):
-        cors.add(route)
-
-    return app
-
 
 if __name__ == "__main__":
-    web.run_app(create_app(), host="0.0.0.0", port=8888)
+    uvicorn.run("server:app", host="0.0.0.0", port=8888, reload=True)
