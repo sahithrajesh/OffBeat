@@ -11,3 +11,4 @@ papermill>=2.6,<3
 sphinx-ai-cli
 jupyter-server
 ipykernel
+matplotlib>=3.8,<4

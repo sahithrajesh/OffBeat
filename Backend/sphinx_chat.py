@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 import uuid
 from dataclasses import asdict
 from pathlib import Path
@@ -33,6 +34,81 @@ _SESSIONS_DIR.mkdir(exist_ok=True)
 
 # Map of user_id -> { notebook_path, cell_count }
 _SESSION_STATE: Dict[str, Dict[str, Any]] = {}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Persistent Jupyter server (shared by all sphinx-cli calls)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_JUPYTER_TOKEN = uuid.uuid4().hex
+_JUPYTER_PORT = 18888
+_JUPYTER_URL = f"http://127.0.0.1:{_JUPYTER_PORT}"
+_jupyter_proc: Optional[asyncio.subprocess.Process] = None
+_jupyter_ready = False
+
+
+async def _ensure_jupyter_server() -> str:
+    """Start a background Jupyter server if one isn't running.
+
+    Returns the server URL (http://127.0.0.1:<port>).
+    """
+    global _jupyter_proc, _jupyter_ready
+
+    # Already running?
+    if _jupyter_proc is not None and _jupyter_proc.returncode is None:
+        return _JUPYTER_URL
+
+    logger.info("[sphinx] Starting persistent Jupyter server …")
+
+    _jupyter_proc = await asyncio.create_subprocess_exec(
+        "jupyter", "server",
+        "--ServerApp.token", _JUPYTER_TOKEN,
+        "--ServerApp.port", str(_JUPYTER_PORT),
+        "--ServerApp.ip", "127.0.0.1",
+        "--no-browser",
+        "--ServerApp.root_dir", str(_SESSIONS_DIR),
+        "--ServerApp.disable_check_xsrf", "True",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+
+    # Wait until the server prints that it's ready (up to 30 s)
+    assert _jupyter_proc.stdout is not None
+    try:
+        deadline = asyncio.get_event_loop().time() + 30
+        while asyncio.get_event_loop().time() < deadline:
+            line_bytes = await asyncio.wait_for(
+                _jupyter_proc.stdout.readline(), timeout=5
+            )
+            line = line_bytes.decode(errors="replace")
+            logger.info(f"[jupyter] {line.rstrip()}")
+            if "Jupyter Server" in line and "is running" in line:
+                _jupyter_ready = True
+                break
+            if _jupyter_proc.returncode is not None:
+                remaining = await _jupyter_proc.stdout.read()
+                logger.error(f"[jupyter] Server exited early: {remaining.decode(errors='replace')[:500]}")
+                raise RuntimeError("Jupyter server exited before becoming ready")
+    except asyncio.TimeoutError:
+        logger.warning("[sphinx] Timed out waiting for Jupyter ready line, assuming OK")
+        _jupyter_ready = True
+
+    # Drain remaining output in background
+    async def _drain():
+        assert _jupyter_proc is not None and _jupyter_proc.stdout is not None
+        async for raw in _jupyter_proc.stdout:
+            logger.debug(f"[jupyter] {raw.decode(errors='replace').rstrip()}")
+
+    asyncio.ensure_future(_drain())
+    logger.info(f"[sphinx] Jupyter server running at {_JUPYTER_URL}")
+    return _JUPYTER_URL
+
+
+def shutdown_jupyter_server() -> None:
+    """Called at app shutdown to stop the background Jupyter server."""
+    global _jupyter_proc
+    if _jupyter_proc and _jupyter_proc.returncode is None:
+        _jupyter_proc.terminate()
+        logger.info("[sphinx] Stopped Jupyter server")
 
 # Schema for structured Sphinx output when producing explanations (not plots)
 _EXPLANATION_SCHEMA = json.dumps({
@@ -255,12 +331,17 @@ async def run_sphinx(
 
     prev_cell_count = session["cell_count"]
 
+    # Ensure Jupyter server is up
+    jupyter_url = await _ensure_jupyter_server()
+
     # Build command
     sphinx_api_key = os.environ.get("SPHINX_API_KEY", "")
     cmd = [
         "sphinx-cli", "chat",
         "--notebook-filepath", nb_path,
         "--prompt", prompt,
+        "--jupyter-server-url", jupyter_url,
+        "--jupyter-server-token", _JUPYTER_TOKEN,
         "--no-memory-read",
         "--no-memory-write",
         "--no-web-search",

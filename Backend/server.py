@@ -64,7 +64,7 @@ from analysis import (
     analysis_output_to_dict,
     clear_cache as clear_analysis_cache,
 )
-from sphinx_chat import run_sphinx, destroy_session as destroy_sphinx_session
+from sphinx_chat import run_sphinx, destroy_session as destroy_sphinx_session, shutdown_jupyter_server
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -95,6 +95,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("shutdown")
+def _shutdown():
+    shutdown_jupyter_server()
 
 
 # Middleware to log incoming requests
