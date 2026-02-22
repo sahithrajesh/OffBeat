@@ -252,6 +252,67 @@ def _build_context_markdown(
     return "\n".join(parts)
 
 
+def _build_prompt_context(
+    enriched: List[EnrichedPlaylist],
+    analyses: Optional[List[AnalysisOutput]] = None,
+) -> str:
+    """Build a concise data summary to prepend to the user's prompt.
+
+    This ensures Sphinx always has the playlist / cluster / anomaly context
+    regardless of whether notebook cells were executed.
+    """
+    lines: List[str] = []
+    lines.append("=== OFFBEAT PLAYLIST DATA ===")
+
+    for ep in enriched:
+        lines.append(f"\nPlaylist: {ep.name} ({len(ep.tracks)} tracks)")
+        # Include track listing (title + artist + key audio features)
+        for i, t in enumerate(ep.tracks[:80]):  # cap at 80 to stay under token limits
+            artist = t.artist if hasattr(t, 'artist') else ''
+            energy = getattr(t, 'energy', None)
+            valence = getattr(t, 'valence', None)
+            tempo = getattr(t, 'tempo', None)
+            feat_str = ""
+            if energy is not None:
+                feat_str += f" energy={energy:.2f}"
+            if valence is not None:
+                feat_str += f" valence={valence:.2f}"
+            if tempo is not None:
+                feat_str += f" tempo={tempo:.0f}"
+            tags = ''
+            if hasattr(t, 'tags') and t.tags:
+                top_tags = t.tags[:5] if isinstance(t.tags, list) else list(t.tags.keys())[:5]
+                tags = f" tags=[{', '.join(str(x) for x in top_tags)}]"
+            lines.append(f"  {i+1}. {t.title} — {artist}{feat_str}{tags}")
+        if len(ep.tracks) > 80:
+            lines.append(f"  ... and {len(ep.tracks) - 80} more tracks")
+
+    if analyses:
+        lines.append("\n=== ANALYSIS RESULTS ===")
+        for ao in analyses:
+            lines.append(f"\nPlaylist: {ao.playlist_name}")
+            lines.append(f"Summary: {ao.summary.num_tracks} tracks, "
+                         f"{ao.summary.num_anomalies} anomalies, "
+                         f"anomaly cutoff={ao.summary.anomaly_score_cutoff:.2f}")
+            for c in ao.clusters:
+                lines.append(f"\n  Cluster '{c.label}' (id={c.cluster_id}, {c.size} tracks):")
+                lines.append(f"    Top tags: {', '.join(c.centroid_features.top_tags[:8])}")
+                if c.centroid_features.audio_means:
+                    means = c.centroid_features.audio_means
+                    lines.append(f"    Audio: energy={means.get('energy', '?')}, "
+                                 f"valence={means.get('valence', '?')}, "
+                                 f"tempo={means.get('tempo', '?')}, "
+                                 f"danceability={means.get('danceability', '?')}")
+                # List tracks in this cluster
+                for t in c.tracks:
+                    anom_flag = " [ANOMALY" + (f" score={t.anomaly_score:.2f}" if t.anomaly_score else "") + "]" if t.is_anomaly else ""
+                    reason = f" reason: {t.reason}" if t.is_anomaly and t.reason else ""
+                    lines.append(f"    - {t.title} (id={t.spotify_id}){anom_flag}{reason}")
+
+    lines.append("\n=== END DATA ===")
+    return "\n".join(lines)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Session management
 # ═══════════════════════════════════════════════════════════════════════════
