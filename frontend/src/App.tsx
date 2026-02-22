@@ -26,7 +26,7 @@ function LoginPage() {
     <div className="flex h-screen w-full items-center justify-center bg-gray-950 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-brand-navy/30 via-gray-950 to-gray-950 text-brand-lavender">
       <div className="bg-white/[0.02] backdrop-blur-2xl p-12 rounded-3xl border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.5)] flex flex-col items-center max-w-md w-full text-center">
         <h1 className="text-4xl font-extrabold tracking-tight mb-3 bg-gradient-to-br from-white via-white to-brand-teal text-transparent bg-clip-text">
-          Hacklytics App
+          OffBeat
         </h1>
         <p className="text-brand-teal/80 mb-10 font-medium">AI-Powered Playlist Analytics</p>
         <Button
