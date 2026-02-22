@@ -335,13 +335,23 @@ async def run_sphinx(
     # Ensure Jupyter server is up
     jupyter_url = await _ensure_jupyter_server()
 
+    # Build context-enriched prompt so Sphinx always has the data
+    context = _build_prompt_context(enriched, analyses)
+    full_prompt = (
+        f"{context}\n\n"
+        f"USER QUESTION: {prompt}\n\n"
+        f"Answer the user's question using the playlist data above. "
+        f"Refer to specific tracks by name and artist. "
+        f"If the user asks about anomalies, explain why using the anomaly scores, reasons, and cluster context."
+    )
+
     # Build command
     sphinx_api_key = os.environ.get("SPHINX_API_KEY", "")
     rules_path = Path(__file__).parent / "chat_response_style.md"
     cmd = [
         "sphinx-cli", "chat",
         "--notebook-filepath", nb_path,
-        "--prompt", prompt,
+        "--prompt", full_prompt,
         "--jupyter-server-url", jupyter_url,
         "--jupyter-server-token", _JUPYTER_TOKEN,
         "--sphinx-rules-path", str(rules_path),
@@ -493,9 +503,14 @@ def _parse_notebook_response(
     if text_parts:
         combined_text = "\n\n".join(text_parts)
     elif cli_stdout.strip():
-        # Sphinx may have written its answer to stdout instead of the notebook
+        # Sphinx wrote its answer to stdout — strip the "Sphinx: " prefix
         logger.info("[sphinx] No new notebook cells found, using CLI stdout as response")
         combined_text = cli_stdout.strip()
+        # Remove leading "Sphinx: " prefix if present
+        if combined_text.startswith("Sphinx: "):
+            combined_text = combined_text[len("Sphinx: "):]
+        elif combined_text.startswith("Sphinx:"):
+            combined_text = combined_text[len("Sphinx:"):].lstrip()
     else:
         combined_text = "I wasn't able to generate a response. Please try rephrasing your question."
 
