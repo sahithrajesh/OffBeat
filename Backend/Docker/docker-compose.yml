@@ -11,7 +11,6 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./traefik.yml:/traefik.yml:ro
-      - ./acme.json:/acme.json
     networks:
       - app-network
     labels:
@@ -24,8 +23,7 @@ services:
     ports:
       - "8090:8090"
     volumes:
-      - pb_data:/pb/pb_data
-      - pb_public:/pb/pb_public
+      - /opt/containers/pb:/pb_data
     networks:
       - app-network
 
@@ -36,7 +34,7 @@ services:
     container_name: backend
     restart: unless-stopped
     env_file:
-      - ../.env
+      - .env
     depends_on:
       - pocketbase
     networks:
@@ -45,29 +43,26 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.backend.rule=PathPrefix(`/api`)"
       - "traefik.http.routers.backend.priority=100"
-      - "traefik.http.routers.backend.entrypoints=web,websecure"
+      - "traefik.http.routers.backend.entrypoints=websecure"
+      - "traefik.http.routers.backend.tls=true"
       - "traefik.http.services.backend.loadbalancer.server.port=8888"
       - "traefik.http.middlewares.backend-stripprefix.stripprefix.prefixes=/api"
-      - "traefik.http.routers.backend.middlewares=backend-stripprefix@docker"
+      - "traefik.http.routers.backend.middlewares=backend-stripprefix"
 
-  frontend:
-    build:
-      context: ../frontend
-      dockerfile: Dockerfile.prod
-    container_name: frontend
-    restart: unless-stopped
-    networks:
-      - app-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
-      - "traefik.http.routers.frontend.priority=1"
-      - "traefik.http.routers.frontend.entrypoints=web,websecure"
-      - "traefik.http.services.frontend.loadbalancer.server.port=80"
-
-volumes:
-  pb_data:
-  pb_public:
+  # frontend:
+  #   build:
+  #     context: ../frontend
+  #     dockerfile: Dockerfile.prod
+  #   container_name: frontend
+  #   restart: unless-stopped
+  #   networks:
+  #     - app-network
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+  #     - "traefik.http.routers.frontend.priority=1"
+  #     - "traefik.http.routers.frontend.entrypoints=web"
+  #     - "traefik.http.services.frontend.loadbalancer.server.port=80"
 
 networks:
   app-network:
