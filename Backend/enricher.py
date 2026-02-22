@@ -1,18 +1,12 @@
 """Playlist enrichment – takes Spotify playlist data and returns EnrichedPlaylists.
 
 Public entry point: :func:`enrich_playlists`.
-
-The enricher checks the PocketBase cache for already-enriched tracks before
-making any external API calls.  Only genuinely new tracks are sent to
-ReccoBeats / Last.fm, which dramatically reduces rate-limit pressure when
-users share overlapping playlists.
 """
 
 from __future__ import annotations
 
 import asyncio
 
-import cache
 from models import EnrichedTrack, EnrichedPlaylist, Track
 from spotify_client import get_playlist_tracks
 from reccobeats_client import lookup_reccobeats_ids, fetch_audio_features
@@ -46,69 +40,41 @@ def _fuse(
 async def _enrich_tracks(tracks: list[Track]) -> list[EnrichedTrack]:
     """Run the ReccoBeats + Last.fm enrichment pipeline on a list of tracks.
 
-    First checks PocketBase for already-enriched tracks.  Only truly new
-    tracks are sent to the external APIs, then everything is merged.
+    Fetches audio features and tags concurrently, then fuses them with the
+    track metadata.
     """
     if not tracks:
         return []
 
-    all_sids = [t.spotify_id for t in tracks]
+    spotify_ids = [t.spotify_id for t in tracks]
 
-    # ---- Check cache for existing enriched tracks -------------------------
-    cached_map = await cache.get_cached_tracks(all_sids)
-    uncached_tracks = [t for t in tracks if t.spotify_id not in cached_map]
+    # Build Last.fm lookup tuples (spotify_id, first artist, title)
+    lastfm_tuples = [
+        (t.spotify_id, t.artists[0].name if t.artists else "", t.title)
+        for t in tracks
+    ]
 
-    print(
-        f"  {len(cached_map)} track(s) already cached, "
-        f"{len(uncached_tracks)} need enrichment."
+    print("  Fetching ReccoBeats features and Last.fm tags concurrently…")
+
+    async def _reccobeats_flow() -> tuple[dict, dict]:
+        id_map = await lookup_reccobeats_ids(spotify_ids)
+        print(f"    ReccoBeats: resolved {len(id_map)}/{len(spotify_ids)} IDs.")
+        features = await fetch_audio_features(id_map)
+        print(f"    ReccoBeats: fetched features for {len(features)} track(s).")
+        return id_map, features
+
+    async def _lastfm_flow() -> dict:
+        tags = await fetch_tags(lastfm_tuples)
+        tagged = sum(1 for v in tags.values() if v)
+        print(f"    Last.fm: fetched tags for {tagged}/{len(tracks)} track(s).")
+        return tags
+
+    (id_mapping, features_map), tags_map = await asyncio.gather(
+        _reccobeats_flow(),
+        _lastfm_flow(),
     )
 
-    # ---- Enrich only the uncached tracks ----------------------------------
-    new_enriched: dict[str, EnrichedTrack] = {}
-    if uncached_tracks:
-        spotify_ids = [t.spotify_id for t in uncached_tracks]
-
-        lastfm_tuples = [
-            (t.spotify_id, t.artists[0].name if t.artists else "", t.title)
-            for t in uncached_tracks
-        ]
-
-        print("  Fetching ReccoBeats features and Last.fm tags concurrently…")
-
-        async def _reccobeats_flow() -> tuple[dict, dict]:
-            id_map = await lookup_reccobeats_ids(spotify_ids)
-            print(f"    ReccoBeats: resolved {len(id_map)}/{len(spotify_ids)} IDs.")
-            features = await fetch_audio_features(id_map)
-            print(f"    ReccoBeats: fetched features for {len(features)} track(s).")
-            return id_map, features
-
-        async def _lastfm_flow() -> dict:
-            tags = await fetch_tags(lastfm_tuples)
-            tagged = sum(1 for v in tags.values() if v)
-            print(f"    Last.fm: fetched tags for {tagged}/{len(uncached_tracks)} track(s).")
-            return tags
-
-        (id_mapping, features_map), tags_map = await asyncio.gather(
-            _reccobeats_flow(),
-            _lastfm_flow(),
-        )
-
-        freshly_enriched = _fuse(uncached_tracks, features_map, tags_map, id_mapping)
-
-        # Save newly enriched tracks to PocketBase for future reuse
-        await cache.save_tracks(freshly_enriched)
-
-        for et in freshly_enriched:
-            new_enriched[et.spotify_id] = et
-
-    # ---- Merge cached + new, preserving original order --------------------
-    result: list[EnrichedTrack] = []
-    for sid in all_sids:
-        if sid in cached_map:
-            result.append(cached_map[sid])
-        elif sid in new_enriched:
-            result.append(new_enriched[sid])
-    return result
+    return _fuse(tracks, features_map, tags_map, id_mapping)
 
 
 async def enrich_playlists(

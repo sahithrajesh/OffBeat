@@ -1,23 +1,29 @@
+version: "3.8"
+
 services:
   traefik:
-    image: traefik:v3.6.8
+    image: traefik:v2.10
     container_name: traefik
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock
       - ./traefik.yml:/traefik.yml:ro
-    networks:
-      - app-network
+      - ./acme.json:/acme.json
+    labels:
+      - "traefik.enable=true"
 
   pocketbase:
     image: ghcr.io/muchobien/pocketbase:latest
     container_name: pocketbase
     restart: unless-stopped
+    ports:
+      - "8090:8090"
     volumes:
-      - /opt/containers/pb:/pb_data
+      - pb_data:/pb/pb_data
+      - pb_public:/pb/pb_public
     networks:
       - app-network
     labels:
@@ -37,30 +43,27 @@ services:
 
   backend:
     build:
-      context: ./Hacklytics-2026/Backend
+      context: ..
       dockerfile: Docker/Dockerfile
     container_name: backend
     restart: unless-stopped
     env_file:
-      - .env
+      - ../.env
     depends_on:
       - pocketbase
     networks:
       - app-network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.backend.rule=Host(`off-beat.tech`) && PathPrefix(`/api`)"
-      - "traefik.http.routers.backend.priority=20"
-      - "traefik.http.routers.backend.entrypoints=websecure"
-      - "traefik.http.routers.backend.tls=true"
+      - "traefik.http.routers.backend.rule=PathPrefix(`/api`)"
+      - "traefik.http.routers.backend.entrypoints=web,websecure"
       - "traefik.http.services.backend.loadbalancer.server.port=8888"
-      - "traefik.http.services.backend.loadbalancer.server.scheme=http"
       - "traefik.http.middlewares.backend-stripprefix.stripprefix.prefixes=/api"
       - "traefik.http.routers.backend.middlewares=backend-stripprefix"
 
   frontend:
     build:
-      context: ./Hacklytics-2026/frontend
+      context: ../frontend
       dockerfile: Dockerfile.prod
     container_name: frontend
     restart: unless-stopped
@@ -68,12 +71,13 @@ services:
       - app-network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.frontend.rule=Host(`off-beat.tech`) && PathPrefix(`/`)"
-      - "traefik.http.routers.frontend.priority=1"
-      - "traefik.http.routers.frontend.entrypoints=websecure"
-      - "traefik.http.routers.frontend.tls=true"
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.frontend.entrypoints=web,websecure"
       - "traefik.http.services.frontend.loadbalancer.server.port=80"
-      - "traefik.http.services.frontend.loadbalancer.server.scheme=http"
+
+volumes:
+  pb_data:
+  pb_public:
 
 networks:
   app-network:
