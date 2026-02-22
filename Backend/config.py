@@ -18,5 +18,8 @@ POCKETBASE_ADMIN_PASSWORD: str = os.environ.get("POCKETBASE_ADMIN_PASSWORD", "ad
 # JWT session secret – generate a strong random value for production
 JWT_SECRET: str = os.environ.get("JWT_SECRET", "change-me-to-a-real-secret")
 
+# Sphinx AI
+SPHINX_API_KEY: str = os.environ.get("SPHINX_API_KEY", "")
+
 # Frontend URL for CORS & redirect after login
 FRONTEND_URL: str = os.environ.get("FRONTEND_URL", "http://localhost:5173")

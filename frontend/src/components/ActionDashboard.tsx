@@ -1,14 +1,16 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { ArrowRight, Loader2, AlertTriangle, Menu, X, ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight, Music2, Check } from 'lucide-react';
+import { ArrowRight, Loader2, AlertTriangle, Menu, X, ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight, Music2, Check, MessageCircle, RotateCcw } from 'lucide-react';
 import type { Playlist, EnrichedPlaylist } from '@/lib/api';
 import {
   analyzePlaylists,
   basicRecommendations,
   createPlaylist,
+  sphinxChat,
+  sphinxReset,
 } from '@/lib/api';
 import {
   AUDIO_FEATURE_META,
@@ -772,6 +774,255 @@ function CompareView({ data, selectedTrackIds, onToggleTrack }: { data: Analysis
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// SphinxAI Chat Panel — floating chat with message history
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  images?: string[];  // base64 PNGs
+  isLoading?: boolean;
+}
+
+function SphinxChatPanel({ playlistIds }: { playlistIds: string[] }) {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  // Focus input when panel opens
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open]);
+
+  const handleSend = useCallback(async () => {
+    const prompt = input.trim();
+    if (!prompt || sending) return;
+
+    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', text: prompt };
+    const loadingMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', text: '', isLoading: true };
+
+    setMessages((prev) => [...prev, userMsg, loadingMsg]);
+    setInput('');
+    setSending(true);
+
+    try {
+      const res = await sphinxChat(playlistIds, prompt);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === loadingMsg.id
+            ? { ...m, text: res.text || 'No response generated.', images: res.images, isLoading: false }
+            : m,
+        ),
+      );
+    } catch (err) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === loadingMsg.id
+            ? { ...m, text: 'Sorry, something went wrong. Please try again.', isLoading: false }
+            : m,
+        ),
+      );
+    } finally {
+      setSending(false);
+    }
+  }, [input, sending, playlistIds]);
+
+  const handleReset = useCallback(async () => {
+    try {
+      await sphinxReset();
+    } catch { /* best effort */ }
+    setMessages([]);
+  }, []);
+
+  // Collapsed pill
+  if (!open) {
+    return (
+      <div className="absolute bottom-3 sm:bottom-6 lg:bottom-8 left-1/2 -translate-x-1/2 w-full max-w-3xl z-30 px-3 sm:px-6">
+        <div className="flex gap-2 bg-gray-900/80 p-1.5 sm:p-2 rounded-xl sm:rounded-2xl border border-white/10 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)]">
+          <Input
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Ask SphinxAI…"
+            className="flex-1 h-10 sm:h-12 border-0 bg-transparent text-white placeholder:text-brand-teal/40 focus-visible:ring-0 text-sm sm:text-base px-3 sm:px-6"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                if (input.trim()) {
+                  setOpen(true);
+                  // Slight delay to let the panel mount before sending
+                  setTimeout(() => handleSend(), 50);
+                }
+              }
+            }}
+            onFocus={() => messages.length > 0 && setOpen(true)}
+          />
+          <Button
+            onClick={() => {
+              if (input.trim()) {
+                setOpen(true);
+                setTimeout(() => handleSend(), 50);
+              } else {
+                setOpen(true);
+              }
+            }}
+            className="h-10 w-10 sm:h-12 sm:w-12 rounded-lg sm:rounded-xl bg-brand-cyan hover:bg-[#008be5] text-white shadow-[0_0_15px_rgba(0,158,250,0.3)] transition-all duration-300 p-0 flex items-center justify-center shrink-0"
+          >
+            <MessageCircle size={18} />
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Expanded chat panel
+  return (
+    <div className="absolute bottom-3 sm:bottom-6 lg:bottom-8 left-1/2 -translate-x-1/2 w-full max-w-3xl z-30 px-3 sm:px-6 animate-in slide-in-from-bottom-4 duration-300">
+      <div className="bg-gray-900/95 rounded-2xl border border-white/10 backdrop-blur-xl shadow-[0_10px_60px_rgba(0,0,0,0.7)] flex flex-col max-h-[70vh] overflow-hidden">
+        {/* Chat header */}
+        <div className="flex items-center justify-between px-4 sm:px-5 py-3 border-b border-white/5">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-brand-cyan animate-pulse" />
+            <span className="text-sm font-semibold text-white">SphinxAI</span>
+            <span className="text-[10px] text-brand-teal/40 uppercase tracking-wider">Chat</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleReset}
+              className="p-1.5 rounded-lg text-brand-teal/40 hover:text-white hover:bg-white/5 transition-colors"
+              title="Reset conversation"
+            >
+              <RotateCcw size={14} />
+            </button>
+            <button
+              onClick={() => setOpen(false)}
+              className="p-1.5 rounded-lg text-brand-teal/40 hover:text-white hover:bg-white/5 transition-colors"
+            >
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </div>
+
+        {/* Messages area */}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-4 min-h-[120px] max-h-[50vh] scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
+          {messages.length === 0 && (
+            <div className="text-center py-8">
+              <MessageCircle size={28} className="mx-auto text-brand-teal/20 mb-3" />
+              <p className="text-sm text-brand-teal/40">Ask about your playlists, clusters, or anomalies</p>
+              <div className="flex flex-wrap justify-center gap-2 mt-4">
+                {['Why is this track an anomaly?', 'Visualize mood clusters', 'Which playlist is most energetic?'].map((q) => (
+                  <button
+                    key={q}
+                    onClick={() => { setInput(q); inputRef.current?.focus(); }}
+                    className="px-3 py-1.5 text-[11px] rounded-lg bg-white/[0.03] border border-white/5 text-brand-teal/60 hover:text-white hover:border-white/10 transition-all"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {messages.map((msg) => (
+            <div
+              key={msg.id}
+              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              <div className={`max-w-[85%] rounded-xl px-3.5 py-2.5 ${
+                msg.role === 'user'
+                  ? 'bg-brand-cyan/15 border border-brand-cyan/20 text-white'
+                  : 'bg-white/[0.03] border border-white/5 text-brand-lavender/90'
+              }`}>
+                {msg.isLoading ? (
+                  <div className="flex items-center gap-2 py-1">
+                    <Loader2 size={14} className="animate-spin text-brand-cyan" />
+                    <span className="text-xs text-brand-teal/50">Thinking…</span>
+                  </div>
+                ) : (
+                  <>
+                    <div
+                      className="text-sm leading-relaxed whitespace-pre-wrap break-words [&_code]:bg-black/30 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[12px] [&_code]:font-mono [&_pre]:bg-black/30 [&_pre]:p-3 [&_pre]:rounded-lg [&_pre]:overflow-x-auto [&_pre]:text-[12px] [&_pre]:font-mono [&_strong]:text-white [&_h1]:text-lg [&_h1]:font-bold [&_h1]:text-white [&_h2]:text-base [&_h2]:font-bold [&_h2]:text-white [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:text-white"
+                      dangerouslySetInnerHTML={{ __html: simpleMarkdown(msg.text) }}
+                    />
+                    {/* Rendered images */}
+                    {msg.images && msg.images.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {msg.images.map((b64, i) => (
+                          <img
+                            key={i}
+                            src={`data:image/png;base64,${b64}`}
+                            alt={`Visualization ${i + 1}`}
+                            className="rounded-lg border border-white/10 max-w-full"
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Input area */}
+        <div className="px-3 sm:px-4 py-3 border-t border-white/5">
+          <div className="flex gap-2">
+            <Input
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Ask a follow-up…"
+              className="flex-1 h-10 sm:h-11 border-0 bg-white/[0.03] rounded-xl text-white placeholder:text-brand-teal/40 focus-visible:ring-1 focus-visible:ring-brand-cyan/30 text-sm px-4"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSend();
+              }}
+              disabled={sending}
+            />
+            <Button
+              onClick={handleSend}
+              disabled={sending || !input.trim()}
+              className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-brand-cyan hover:bg-[#008be5] text-white shadow-[0_0_15px_rgba(0,158,250,0.3)] transition-all duration-300 p-0 flex items-center justify-center shrink-0 disabled:opacity-40"
+            >
+              {sending ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Minimal Markdown → HTML for chat messages (no heavy deps). */
+function simpleMarkdown(md: string): string {
+  return md
+    // Code blocks
+    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+    // Inline code
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    // Bold
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // Italic
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    // Headers
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    // Line breaks
+    .replace(/\n\n/g, '<br/><br/>')
+    .replace(/\n/g, '<br/>');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Main ActionDashboard
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1044,24 +1295,8 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
           </div>
         </div>
 
-        {/* Floating Chat Pill */}
-        <div className="absolute bottom-3 sm:bottom-6 lg:bottom-8 left-1/2 -translate-x-1/2 w-full max-w-3xl z-30 px-3 sm:px-6">
-          <div className="flex gap-2 bg-gray-900/80 p-1.5 sm:p-2 rounded-xl sm:rounded-2xl border border-white/10 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)]">
-            <Input
-              placeholder="Ask SphinxAI…"
-              className="flex-1 h-10 sm:h-12 border-0 bg-transparent text-white placeholder:text-brand-teal/40 focus-visible:ring-0 text-sm sm:text-base px-3 sm:px-6"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  console.log("Sending to Sphinx FastAPI:", e.currentTarget.value);
-                  e.currentTarget.value = "";
-                }
-              }}
-            />
-            <Button className="h-10 w-10 sm:h-12 sm:w-12 rounded-lg sm:rounded-xl bg-brand-cyan hover:bg-[#008be5] text-white shadow-[0_0_15px_rgba(0,158,250,0.3)] transition-all duration-300 p-0 flex items-center justify-center shrink-0">
-              <ArrowRight size={18} />
-            </Button>
-          </div>
-        </div>
+        {/* Floating Chat Pill / Expanded Chat Panel */}
+        <SphinxChatPanel playlistIds={selectedPlaylists.map((p) => p.spotify_id)} />
       </div>
     </div>
   );

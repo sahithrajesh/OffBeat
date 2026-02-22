@@ -12,6 +12,8 @@ POST /compare        → compare a playlist against analysis data
 POST /basic          → generate a basic playlist from analysis data
 POST /anomaly        → generate an anomaly-based playlist
 POST /create         → create a Spotify playlist from enriched tracks
+POST /sphinx         → ask SphinxAI a question about your playlists
+POST /sphinx/reset   → reset SphinxAI session
 
 All protected routes use the ``require_auth`` dependency to extract the
 Spotify user ID from the JWT.  Enrichment (Spotify track fetch + ReccoBeats
@@ -62,6 +64,7 @@ from analysis import (
     analysis_output_to_dict,
     clear_cache as clear_analysis_cache,
 )
+from sphinx_chat import run_sphinx, destroy_session as destroy_sphinx_session
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -511,6 +514,55 @@ async def create_playlist_endpoint(
         logger.error(f"Failed to create playlist: {e}")
         raise HTTPException(status_code=500, detail="Failed to save playlist to Spotify.")
 
+
+
+# ---------------------------------------------------------------------------
+# Sphinx AI chatbot
+# ---------------------------------------------------------------------------
+
+from pydantic import BaseModel
+
+class SphinxChatRequest(BaseModel):
+    playlist_ids: list[str]
+    prompt: str
+
+
+@app.post("/sphinx")
+async def sphinx_chat(
+    body: SphinxChatRequest,
+    spotify_id: str = Depends(require_auth),
+):
+    """Ask SphinxAI a question about your playlists.
+
+    The first request creates a notebook session seeded with the user's
+    enriched + analysed data.  Follow-up questions reuse the same notebook
+    so Sphinx has full conversation context.
+    """
+    if not body.prompt.strip():
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
+
+    enriched = await _get_enriched_playlists(spotify_id, body.playlist_ids)
+    if not enriched:
+        raise HTTPException(status_code=404, detail="No playlists found.")
+
+    # Run analysis so Sphinx has cluster/anomaly context
+    analyses = run_playlists_analysis(enriched)
+
+    result = await run_sphinx(
+        user_id=spotify_id,
+        prompt=body.prompt,
+        enriched=enriched,
+        analyses=analyses,
+        timeout_seconds=120,
+    )
+    return result
+
+
+@app.post("/sphinx/reset")
+async def sphinx_reset(spotify_id: str = Depends(require_auth)):
+    """Reset the user's SphinxAI session (clears notebook context)."""
+    destroy_sphinx_session(spotify_id)
+    return {"status": "ok"}
 
 
 # ---------------------------------------------------------------------------

@@ -234,3 +234,32 @@ export function fetchAnomalies(
     body: JSON.stringify(playlistIds),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Sphinx AI chatbot
+// ---------------------------------------------------------------------------
+
+export interface SphinxResponse {
+  text: string;
+  images: string[];  // base64-encoded PNGs
+  code: string[];
+  error: string | null;
+}
+
+/** POST /sphinx — ask SphinxAI a question about playlists */
+export function sphinxChat(
+  playlistIds: string[],
+  prompt: string,
+): Promise<SphinxResponse> {
+  return apiFetch<SphinxResponse>("/sphinx", {
+    method: "POST",
+    body: JSON.stringify({ playlist_ids: playlistIds, prompt }),
+  });
+}
+
+/** POST /sphinx/reset — reset the Sphinx session */
+export function sphinxReset(): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>("/sphinx/reset", {
+    method: "POST",
+  });
+}
