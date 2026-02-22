@@ -879,7 +879,9 @@ interface ChatMessage {
   isLoading?: boolean;
 }
 
-function SphinxChatPanel({ playlistIds }: { playlistIds: string[] }) {
+function SphinxChatPanel({ playlistIds, currentAction, actionResult }: { playlistIds: string[]; currentAction: string; actionResult: unknown }) {
+  const actionContextRef = useRef<{ action: string; result: unknown } | null>(null);
+  actionContextRef.current = actionResult != null ? { action: currentAction, result: actionResult } : null;
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -919,7 +921,7 @@ function SphinxChatPanel({ playlistIds }: { playlistIds: string[] }) {
     sendingRef.current = true;
 
     try {
-      const res = await sphinxChat(playlistIdsRef.current, prompt);
+      const res = await sphinxChat(playlistIdsRef.current, prompt, actionContextRef.current);
       setMessages((prev) =>
         prev.map((m) =>
           m.id === loadingMsg.id
@@ -1420,7 +1422,7 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
         </div>
 
         {/* Floating Chat Pill / Expanded Chat Panel */}
-        <SphinxChatPanel playlistIds={selectedPlaylists.map((p) => p.spotify_id)} />
+        <SphinxChatPanel playlistIds={selectedPlaylists.map((p) => p.spotify_id)} currentAction={currentAction} actionResult={result} />
       </div>
     </div>
   );

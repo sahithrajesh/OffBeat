@@ -250,10 +250,15 @@ export interface SphinxResponse {
 export function sphinxChat(
   playlistIds: string[],
   prompt: string,
+  actionContext?: { action: string; result: unknown } | null,
 ): Promise<SphinxResponse> {
   return apiFetch<SphinxResponse>("/sphinx", {
     method: "POST",
-    body: JSON.stringify({ playlist_ids: playlistIds, prompt }),
+    body: JSON.stringify({
+      playlist_ids: playlistIds,
+      prompt,
+      action_context: actionContext ?? undefined,
+    }),
   });
 }
 

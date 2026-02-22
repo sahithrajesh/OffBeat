@@ -35,6 +35,12 @@ _SESSIONS_DIR.mkdir(exist_ok=True)
 # Map of user_id -> { notebook_path, cell_count }
 _SESSION_STATE: Dict[str, Dict[str, Any]] = {}
 
+# Per-user conversation history: user_id -> [{role, content}]
+_CHAT_HISTORY: Dict[str, List[Dict[str, str]]] = {}
+
+# Per-user action context: user_id -> {action, result}
+_ACTION_CONTEXT: Dict[str, Dict[str, Any]] = {}
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Persistent Jupyter server (shared by all sphinx-cli calls)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -313,6 +319,73 @@ def _build_prompt_context(
     return "\n".join(lines)
 
 
+def _build_action_context_block(action_ctx: Dict[str, Any]) -> str:
+    """Build a prompt block describing the user's current view/action results."""
+    import json as _json
+
+    action = action_ctx.get("action", "unknown")
+    result = action_ctx.get("result")
+
+    lines = ["\n=== CURRENT VIEW (action the user just performed) ==="]
+    lines.append(f"Action: {action}")
+
+    if result is None:
+        lines.append("No result data available.")
+        lines.append("=== END CURRENT VIEW ===\n")
+        return "\n".join(lines)
+
+    # Summarise based on the action type
+    if action == "basic" and isinstance(result, dict):
+        # Basic recommendations: { recommendations: [{ track, artist, ... }] }
+        recs = result.get("recommendations", [])
+        lines.append(f"Recommended {len(recs)} tracks:")
+        for i, r in enumerate(recs[:30], 1):
+            name = r.get("track") or r.get("name", "?")
+            artist = r.get("artist", "?")
+            score = r.get("score") or r.get("similarity", "")
+            line = f"  {i}. {name} – {artist}"
+            if score:
+                line += f" (score: {score})"
+            lines.append(line)
+    elif action == "anomaly" and isinstance(result, dict):
+        anomalies = result.get("anomalies", [])
+        lines.append(f"Found {len(anomalies)} anomalies:")
+        for i, a in enumerate(anomalies[:20], 1):
+            name = a.get("track") or a.get("name", "?")
+            artist = a.get("artist", "?")
+            score = a.get("anomaly_score", "")
+            reason = a.get("reason", "")
+            lines.append(f"  {i}. {name} – {artist} | score={score} | {reason}")
+    elif action == "analysis" and isinstance(result, dict):
+        clusters = result.get("clusters", [])
+        lines.append(f"Analysis found {len(clusters)} clusters:")
+        for c in clusters[:10]:
+            cid = c.get("id", "?")
+            size = c.get("size", len(c.get("tracks", [])))
+            label = c.get("label", "")
+            lines.append(f"  Cluster {cid}: {size} tracks – {label}")
+    elif action == "compare" and isinstance(result, dict):
+        lines.append("Comparison results:")
+        for key in ("similarity", "overlap", "shared_tracks", "unique_a", "unique_b"):
+            if key in result:
+                val = result[key]
+                if isinstance(val, list) and len(val) > 10:
+                    val = val[:10]  # truncate long lists
+                lines.append(f"  {key}: {val}")
+    else:
+        # Fallback: dump truncated JSON
+        try:
+            dumped = _json.dumps(result, default=str)
+            if len(dumped) > 3000:
+                dumped = dumped[:3000] + "…"
+            lines.append(dumped)
+        except Exception:
+            lines.append(str(result)[:3000])
+
+    lines.append("=== END CURRENT VIEW ===\n")
+    return "\n".join(lines)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Session management
 # ═══════════════════════════════════════════════════════════════════════════
@@ -340,6 +413,7 @@ def create_session(
         "notebook_path": str(nb_path),
         "cell_count": len(nb["cells"]),
     }
+    _CHAT_HISTORY[user_id] = []  # reset history on new session
 
     logger.info(f"[sphinx] Created session for {user_id} at {nb_path}")
     return str(nb_path)
@@ -353,6 +427,8 @@ def get_session(user_id: str) -> Optional[Dict[str, Any]]:
 def destroy_session(user_id: str) -> None:
     """Clean up a user session."""
     state = _SESSION_STATE.pop(user_id, None)
+    _CHAT_HISTORY.pop(user_id, None)
+    _ACTION_CONTEXT.pop(user_id, None)
     if state:
         user_dir = _SESSIONS_DIR / user_id
         if user_dir.exists():
@@ -369,11 +445,19 @@ async def run_sphinx(
     prompt: str,
     enriched: List[EnrichedPlaylist],
     analyses: Optional[List[AnalysisOutput]] = None,
+    action_context: Optional[Dict[str, Any]] = None,
     timeout_seconds: int = 120,
 ) -> Dict[str, Any]:
     """Run ``sphinx-cli chat`` and return parsed response.
 
     Creates the session notebook on first call; reuses it for follow-ups.
+
+    Parameters
+    ----------
+    action_context : dict, optional
+        ``{"action": "<action_key>", "result": <JSON result>}`` from the
+        frontend's current view.  Stored per-user and injected into every
+        prompt so Sphinx knows what the user is looking at.
 
     Returns
     -------
@@ -391,6 +475,10 @@ async def run_sphinx(
     else:
         nb_path = session["notebook_path"]
 
+    # Persist the latest action context for this user
+    if action_context:
+        _ACTION_CONTEXT[user_id] = action_context
+
     prev_cell_count = session["cell_count"]
 
     # Ensure Jupyter server is up
@@ -398,13 +486,38 @@ async def run_sphinx(
 
     # Build context-enriched prompt so Sphinx always has the data
     context = _build_prompt_context(enriched, analyses)
+
+    # Include the current action view context (what the user sees on screen)
+    action_block = ""
+    stored_action = _ACTION_CONTEXT.get(user_id)
+    if stored_action:
+        action_block = _build_action_context_block(stored_action)
+
+    # Include conversation history for follow-up context
+    history = _CHAT_HISTORY.get(user_id, [])
+    history_block = ""
+    if history:
+        history_lines = ["\n=== CONVERSATION HISTORY ==="]
+        for msg in history[-10:]:  # last 10 exchanges to stay under token limits
+            role = msg["role"].upper()
+            history_lines.append(f"{role}: {msg['content']}")
+        history_lines.append("=== END HISTORY ===\n")
+        history_block = "\n".join(history_lines)
+
     full_prompt = (
         f"{context}\n\n"
+        f"{action_block}"
+        f"{history_block}"
         f"USER QUESTION: {prompt}\n\n"
-        f"Answer the user's question using the playlist data above. "
+        f"Answer the user's question directly using the playlist data and the current view context above. "
+        f"Use the conversation history for context on follow-up questions. "
         f"Refer to specific tracks by name and artist. "
-        f"If the user asks about anomalies, explain why using the anomaly scores, reasons, and cluster context."
+        f"If the user asks about anomalies, explain why using the anomaly scores, reasons, and cluster context. "
+        f"If the user asks about recommendations, use the CURRENT VIEW data to explain which songs were recommended and why."
     )
+
+    # Record the user message in history
+    _CHAT_HISTORY.setdefault(user_id, []).append({"role": "user", "content": prompt})
 
     # Build command
     sphinx_api_key = os.environ.get("SPHINX_API_KEY", "")
@@ -474,7 +587,16 @@ async def run_sphinx(
         }
 
     # Parse the modified notebook for new cells
-    return _parse_notebook_response(nb_path, prev_cell_count, user_id, stdout_text)
+    result = _parse_notebook_response(nb_path, prev_cell_count, user_id, stdout_text)
+
+    # Record the assistant's reply in history for follow-up context
+    if result.get("text") and not result.get("error"):
+        _CHAT_HISTORY.setdefault(user_id, []).append({
+            "role": "assistant",
+            "content": result["text"][:500],  # cap to keep prompt size manageable
+        })
+
+    return result
 
 
 def _parse_notebook_response(
@@ -564,9 +686,12 @@ def _parse_notebook_response(
     if text_parts:
         combined_text = "\n\n".join(text_parts)
     elif cli_stdout.strip():
-        # Sphinx wrote its answer to stdout — strip the "Sphinx: " prefix
+        # Sphinx wrote its answer to stdout — clean it up
         logger.info("[sphinx] No new notebook cells found, using CLI stdout as response")
         combined_text = cli_stdout.strip()
+        # Strip ANSI escape codes (e.g. \x1b[1m, \x1b[0m)
+        import re
+        combined_text = re.sub(r'\x1b\[[0-9;]*m', '', combined_text)
         # Remove leading "Sphinx: " prefix if present
         if combined_text.startswith("Sphinx: "):
             combined_text = combined_text[len("Sphinx: "):]

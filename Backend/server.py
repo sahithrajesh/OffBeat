@@ -554,6 +554,7 @@ from pydantic import BaseModel
 class SphinxChatRequest(BaseModel):
     playlist_ids: list[str]
     prompt: str
+    action_context: Optional[dict] = None  # current action type + result summary
 
 
 @app.post("/sphinx")
@@ -582,6 +583,7 @@ async def sphinx_chat(
         prompt=body.prompt,
         enriched=enriched,
         analyses=analyses,
+        action_context=body.action_context,
         timeout_seconds=120,
     )
     return result
