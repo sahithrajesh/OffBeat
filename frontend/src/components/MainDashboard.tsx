@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Disc3, Check, AlertCircle, Menu, X } from 'lucide-react';
@@ -14,11 +15,11 @@ interface MainDashboardProps {
 
 export function MainDashboard({ playlists, selectedPlaylists, togglePlaylist, onActionSelect }: MainDashboardProps) {
   const actions = [
-    { title: "Anomaly Detection", desc: "Find songs that don't belong in these playlists." },
-    { title: "Mood Detection", desc: "Analyze the acoustic sentiment of your tracks." },
-    { title: "Playlist Comparisons", desc: "See the overlap and differences between selections." },
-    { title: "Mood Finder", desc: "Generate a new playlist based on a specific vibe." },
-    { title: "Recommendations", desc: "Get AI suggestions to improve your mixes." }
+    { key: "anomaly", title: "Anomaly Detection", desc: "Find songs that don't belong in these playlists." },
+    { key: "analysis", title: "Mood Detection", desc: "Analyze the acoustic sentiment of your tracks." },
+    { key: "compare", title: "Playlist Comparisons", desc: "See the overlap and differences between selections." },
+    { key: "basic", title: "Mood Finder", desc: "Generate a new playlist based on a specific vibe." },
+    { key: "recommendations", title: "Recommendations", desc: "Get AI suggestions to improve your mixes." }
   ];
 
   const hasSelection = selectedPlaylists.length > 0;
@@ -32,7 +33,7 @@ export function MainDashboard({ playlists, selectedPlaylists, togglePlaylist, on
   useEffect(() => {
     if (!getToken()) return;
     fetchMe()
-      .then((profile) => setUser(profile))
+      .then((profile: any) => setUser(profile))
       .catch(() => setUser(null));
   }, []);
 

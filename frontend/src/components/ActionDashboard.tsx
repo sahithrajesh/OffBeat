@@ -146,7 +146,7 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
           <p className="text-xs text-brand-teal/50">{ep.tracks.length} tracks</p>
 
           <div className="space-y-2 mt-4">
-            {ep.tracks.map((t) => (
+            {ep.tracks.map((t: any) => (
               <div
                 key={t.spotify_id}
                 className="flex items-center gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl bg-white/[0.02] border border-white/5"
@@ -195,8 +195,8 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
           <div>
             <h3 className="text-xl sm:text-2xl font-bold text-white mb-4 sm:mb-6">Playlist DNA</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-6">
-              {Object.entries(playlistData.clusters).map(([clusterName, cluster]: [string, any]) => (
-                <div key={clusterName} className="bg-white/[0.02] border border-white/5 p-4 sm:p-6 rounded-xl sm:rounded-2xl">
+              {Object.entries(playlistData.clusters).map(([clusterName, cluster]: [string, any], idx: number) => (
+                <div key={idx} className="bg-white/[0.02] border border-white/5 p-4 sm:p-6 rounded-xl sm:rounded-2xl">
                   <h4 className="text-sm sm:text-lg font-bold text-white capitalize mb-3 sm:mb-4">
                     {clusterName.replace(/_/g, ' ')}
                     <span className="text-xs font-normal text-brand-teal/50 ml-2 sm:ml-3">({cluster.size} tracks)</span>
@@ -206,11 +206,11 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
                   <div className="space-y-3 sm:space-y-4 mb-4 sm:mb-6">
                     <div>
                       <div className="flex justify-between text-xs mb-1.5"><span className="text-brand-lavender/80">Energy</span><span className="text-brand-cyan">{(cluster.centroid_features.audio_means.energy * 100).toFixed(0)}%</span></div>
-                      <Progress value={cluster.centroid_features.audio_means.energy * 100} className="h-1.5 bg-white/5" indicatorColor="bg-brand-cyan" />
+                      <Progress value={cluster.centroid_features.audio_means.energy * 100} className="h-1.5 bg-white/5" />
                     </div>
                     <div>
                       <div className="flex justify-between text-xs mb-1.5"><span className="text-brand-lavender/80">Danceability</span><span className="text-brand-magenta">{(cluster.centroid_features.audio_means.danceability * 100).toFixed(0)}%</span></div>
-                      <Progress value={cluster.centroid_features.audio_means.danceability * 100} className="h-1.5 bg-white/5" indicatorColor="bg-brand-magenta" />
+                      <Progress value={cluster.centroid_features.audio_means.danceability * 100} className="h-1.5 bg-white/5" />
                     </div>
                   </div>
 
