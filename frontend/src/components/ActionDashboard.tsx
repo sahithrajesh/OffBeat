@@ -734,10 +734,10 @@ function CompareView({ data, selectedTrackIds, onToggleTrack }: { data: Analysis
       </div>
 
       {/* Audio Features Comparison Table */}
-      <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 sm:p-6 overflow-x-auto">
+      <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 sm:p-6 overflow-x-auto w-full">
         <h4 className="text-sm font-semibold text-white mb-4">Audio Features Comparison</h4>
-        <div className="min-w-max">
-          <div className="grid gap-4" style={{ gridTemplateColumns: `200px repeat(${playlists.length}, 1fr)` }}>
+        <div className="w-full">
+          <div className="grid gap-4" style={{ gridTemplateColumns: `minmax(160px, 200px) repeat(${playlists.length}, minmax(100px, 1fr))` }}>
             {/* Header row */}
             <div className="text-xs font-semibold text-brand-teal/60 uppercase tracking-wider pb-3 border-b border-white/5">
               Feature
@@ -745,7 +745,7 @@ function CompareView({ data, selectedTrackIds, onToggleTrack }: { data: Analysis
             {playlists.map((p, i) => {
               const c = CLUSTER_COLORS[i % CLUSTER_COLORS.length];
               return (
-                <div key={p.playlist_id} className={`text-xs font-semibold ${c.text} uppercase tracking-wider pb-3 border-b border-white/5 truncate`}>
+                <div key={p.playlist_id} className={`text-xs font-semibold ${c.text} uppercase tracking-wider pb-3 border-b border-white/5 truncate`} title={p.playlist_name} style={{ minWidth: 0 }}>
                   {p.playlist_name}
                 </div>
               );
@@ -760,11 +760,11 @@ function CompareView({ data, selectedTrackIds, onToggleTrack }: { data: Analysis
 
               return (
                 <div key={feat} className="contents">
-                  <div className="text-[11px] text-brand-teal/70 py-2">{meta.label}</div>
+                  <div className="text-[11px] text-brand-teal/70 py-2 truncate" style={{ minWidth: 0 }} title={meta.label}>{meta.label}</div>
                   {averages.map((avg, i) => {
                     const c = CLUSTER_COLORS[i % CLUSTER_COLORS.length];
                     return (
-                      <div key={`${feat}-${i}`} className={`text-[11px] font-mono py-2 px-2 rounded ${c.bg}`}>
+                      <div key={`${feat}-${i}`} className={`text-[11px] font-mono py-2 px-2 rounded truncate flex items-center justify-center ${c.bg}`} style={{ minWidth: 0 }}>
                         {formatVal(avg[feat])}
                       </div>
                     );
@@ -777,12 +777,12 @@ function CompareView({ data, selectedTrackIds, onToggleTrack }: { data: Analysis
       </div>
 
       {/* Cluster Presence Matrix */}
-      <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 sm:p-6 overflow-x-auto">
+      <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 sm:p-6 overflow-x-auto w-full">
         <h4 className="text-sm font-semibold text-white mb-4">Cluster Distribution Across Playlists</h4>
-        <div className="min-w-max">
-          <div className="grid gap-2" style={{ gridTemplateColumns: `180px repeat(${playlists.length}, 80px)` }}>
+        <div className="w-full">
+          <div className="grid gap-2" style={{ gridTemplateColumns: `minmax(150px, 180px) repeat(${playlists.length}, minmax(70px, 1fr))` }}>
             {/* Header */}
-            <div className="text-xs font-semibold text-brand-teal/60 uppercase tracking-wider pb-2 border-b border-white/5">
+            <div className="text-xs font-semibold text-brand-teal/60 uppercase tracking-wider pb-2 border-b border-white/5 truncate" style={{ minWidth: 0 }}>
               Cluster
             </div>
             {playlists.map((p, i) => {
@@ -792,6 +792,7 @@ function CompareView({ data, selectedTrackIds, onToggleTrack }: { data: Analysis
                   key={p.playlist_id}
                   className={`text-xs font-semibold ${c.text} uppercase tracking-wider pb-2 border-b border-white/5 text-center truncate`}
                   title={p.playlist_name}
+                  style={{ minWidth: 0 }}
                 >
                   {p.playlist_name.split(' ')[0]}
                 </div>
@@ -801,7 +802,7 @@ function CompareView({ data, selectedTrackIds, onToggleTrack }: { data: Analysis
             {/* Cluster rows */}
             {clusterArray.map((clusterName) => (
               <div key={clusterName} className="contents">
-                <div className="text-[11px] text-white py-2 truncate capitalize" title={clusterName}>
+                <div className="text-[11px] text-white py-2 truncate capitalize" title={clusterName} style={{ minWidth: 0 }}>
                   {clusterName.replace(/_/g, ' ')}
                 </div>
                 {clusterPresence[clusterName].map((present, i) => {
@@ -810,10 +811,11 @@ function CompareView({ data, selectedTrackIds, onToggleTrack }: { data: Analysis
                   return (
                     <div
                       key={`${clusterName}-${i}`}
-                      className={`flex items-center justify-center py-2 rounded text-xs font-semibold ${
+                      className={`flex items-center justify-center py-2 rounded text-xs font-semibold truncate ${
                         present ? `${c.bg} ${c.text}` : 'bg-white/[0.02] text-brand-teal/20'
                       }`}
                       title={present ? `${cluster?.size || 0} tracks` : 'Not present'}
+                      style={{ minWidth: 0 }}
                     >
                       {present ? cluster?.size || '—' : '—'}
                     </div>
@@ -885,6 +887,13 @@ function SphinxChatPanel({ playlistIds }: { playlistIds: string[] }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Ref-based pending prompt so we survive the collapsed → expanded re-render
+  const pendingPromptRef = useRef<string | null>(null);
+  // Keep latest values in refs so the send function never has stale closures
+  const sendingRef = useRef(false);
+  const playlistIdsRef = useRef(playlistIds);
+  playlistIdsRef.current = playlistIds;
+
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     if (scrollRef.current) {
@@ -897,9 +906,9 @@ function SphinxChatPanel({ playlistIds }: { playlistIds: string[] }) {
     if (open) inputRef.current?.focus();
   }, [open]);
 
-  const handleSend = useCallback(async () => {
-    const prompt = input.trim();
-    if (!prompt || sending) return;
+  // Core send logic — reads from refs, never stale
+  const doSend = useCallback(async (prompt: string) => {
+    if (!prompt || sendingRef.current) return;
 
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', text: prompt };
     const loadingMsg: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', text: '', isLoading: true };
@@ -907,9 +916,10 @@ function SphinxChatPanel({ playlistIds }: { playlistIds: string[] }) {
     setMessages((prev) => [...prev, userMsg, loadingMsg]);
     setInput('');
     setSending(true);
+    sendingRef.current = true;
 
     try {
-      const res = await sphinxChat(playlistIds, prompt);
+      const res = await sphinxChat(playlistIdsRef.current, prompt);
       setMessages((prev) =>
         prev.map((m) =>
           m.id === loadingMsg.id
@@ -918,6 +928,7 @@ function SphinxChatPanel({ playlistIds }: { playlistIds: string[] }) {
         ),
       );
     } catch (err) {
+      console.error('[SphinxChat] send failed', err);
       setMessages((prev) =>
         prev.map((m) =>
           m.id === loadingMsg.id
@@ -927,8 +938,24 @@ function SphinxChatPanel({ playlistIds }: { playlistIds: string[] }) {
       );
     } finally {
       setSending(false);
+      sendingRef.current = false;
     }
-  }, [input, sending, playlistIds]);
+  }, []);
+
+  // When the panel opens with a pending prompt, fire it off
+  useEffect(() => {
+    if (open && pendingPromptRef.current) {
+      const prompt = pendingPromptRef.current;
+      pendingPromptRef.current = null;
+      doSend(prompt);
+    }
+  }, [open, doSend]);
+
+  const handleSend = useCallback(() => {
+    const prompt = input.trim();
+    if (!prompt) return;
+    doSend(prompt);
+  }, [input, doSend]);
 
   const handleReset = useCallback(async () => {
     try {
@@ -950,10 +977,11 @@ function SphinxChatPanel({ playlistIds }: { playlistIds: string[] }) {
             className="flex-1 h-10 sm:h-12 border-0 bg-transparent text-white placeholder:text-brand-teal/40 focus-visible:ring-0 text-sm sm:text-base px-3 sm:px-6"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
-                if (input.trim()) {
+                e.preventDefault();
+                const prompt = input.trim();
+                if (prompt) {
+                  pendingPromptRef.current = prompt;
                   setOpen(true);
-                  // Slight delay to let the panel mount before sending
-                  setTimeout(() => handleSend(), 50);
                 }
               }
             }}
@@ -961,9 +989,10 @@ function SphinxChatPanel({ playlistIds }: { playlistIds: string[] }) {
           />
           <Button
             onClick={() => {
-              if (input.trim()) {
+              const prompt = input.trim();
+              if (prompt) {
+                pendingPromptRef.current = prompt;
                 setOpen(true);
-                setTimeout(() => handleSend(), 50);
               } else {
                 setOpen(true);
               }
@@ -1076,7 +1105,10 @@ function SphinxChatPanel({ playlistIds }: { playlistIds: string[] }) {
               placeholder="Ask a follow-up…"
               className="flex-1 h-10 sm:h-11 border-0 bg-white/[0.03] rounded-xl text-white placeholder:text-brand-teal/40 focus-visible:ring-1 focus-visible:ring-brand-cyan/30 text-sm px-4"
               onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSend();
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSend();
+                }
               }}
               disabled={sending}
             />
