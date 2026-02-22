@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   traefik:
-    image: traefik:v2.10
+    image: traefik:v3.6.8
     container_name: traefik
     restart: unless-stopped
     ports:
@@ -12,6 +12,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./traefik.yml:/traefik.yml:ro
       - ./acme.json:/acme.json
+    networks:
+      - app-network
     labels:
       - "traefik.enable=true"
 
@@ -42,10 +44,11 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.backend.rule=PathPrefix(`/api`)"
+      - "traefik.http.routers.backend.priority=100"
       - "traefik.http.routers.backend.entrypoints=web,websecure"
       - "traefik.http.services.backend.loadbalancer.server.port=8888"
       - "traefik.http.middlewares.backend-stripprefix.stripprefix.prefixes=/api"
-      - "traefik.http.routers.backend.middlewares=backend-stripprefix"
+      - "traefik.http.routers.backend.middlewares=backend-stripprefix@docker"
 
   frontend:
     build:
@@ -58,6 +61,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.frontend.priority=1"
       - "traefik.http.routers.frontend.entrypoints=web,websecure"
       - "traefik.http.services.frontend.loadbalancer.server.port=80"
 

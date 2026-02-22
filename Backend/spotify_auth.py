@@ -22,7 +22,7 @@ from aiohttp import web, ClientSession
 import config
 
 # Scopes needed to read the user's playlists and their tracks.
-SCOPES = "playlist-read-private playlist-read-collaborative"
+SCOPES = "playlist-read-private playlist-read-collaborative user-read-private user-read-email"
 
 SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize"
 SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"

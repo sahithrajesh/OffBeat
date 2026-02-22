@@ -21,6 +21,7 @@ Run with::
 from __future__ import annotations
 
 import secrets
+import logging
 from typing import Optional
 
 from fastapi import FastAPI, Depends, HTTPException, Query, Request
@@ -34,6 +35,13 @@ from spotify_auth import build_authorize_url, exchange_code, get_spotify_user
 from spotify_client import get_user_playlists
 from pocketbase_client import upsert_user, get_valid_access_token, get_user
 from session import create_session_token, verify_session_token
+
+# Set up logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)s - %(message)s",
+)
 
 # In-memory state store (for CSRF protection during OAuth).
 # For a hackathon this is fine; production would use Redis / DB.
@@ -53,6 +61,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Middleware to log incoming requests
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log incoming request path for debugging."""
+    logger.info(f"[request] {request.method} {request.url.path}")
+    response = await call_next(request)
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +94,16 @@ async def require_auth(request: Request) -> str:
 # ---------------------------------------------------------------------------
 # Auth routes
 # ---------------------------------------------------------------------------
+
+@app.get("/")
+async def root():
+    """Health check / root endpoint."""
+    return {
+        "status": "ok",
+        "service": "Hacklytics 2026 API",
+        "docs": "/docs",
+    }
+
 
 @app.get("/auth/login")
 async def login():
@@ -130,7 +157,7 @@ async def callback(
     jwt_token = create_session_token(spotify_id, display_name)
 
     # Redirect to frontend with the JWT as a query param.
-    redirect_url = f"{config.FRONTEND_URL}/auth/callback?token={jwt_token}"
+    redirect_url = f"{config.FRONTEND_URL}/home?token={jwt_token}"
     return RedirectResponse(redirect_url)
 
 
@@ -159,17 +186,37 @@ async def my_playlists(spotify_id: str = Depends(require_auth)):
     access_token = await get_valid_access_token(spotify_id)  # auto-refreshes
     playlists = await get_user_playlists(access_token)
 
-    return [
-        Playlist(
-            spotify_id=p["id"],
-            name=p["name"],
-            total_tracks=p.get("tracks", {}).get("total", 0),
-            owner=p.get("owner", {}).get("display_name", ""),
-            description=p.get("description"),
-            image_url=p.get("images", [{}])[0].get("url") if p.get("images") else None,
+    results = []
+    for p in playlists:
+        # DEBUG — remove after confirming track counts are correct
+        print(f"[DEBUG] playlist={p.get('name')!r}  tracks_field={p.get('tracks')!r}  total_tracks_field={p.get('total_tracks', 'MISSING')}")
+
+        # Spotify returns tracks as {"href": ..., "total": N} in the listing,
+        # but some API versions also put a root-level "total_tracks" field.
+        tracks_field = p.get("tracks")
+        if isinstance(tracks_field, dict):
+            track_count = tracks_field.get("total", 0)
+        elif isinstance(tracks_field, int):
+            track_count = tracks_field
+        else:
+            track_count = 0
+        # Prefer the explicit root-level field if present
+        track_count = p.get("total_tracks", track_count) or track_count
+
+        images = p.get("images") or []
+        image_url = images[0].get("url") if images else None
+
+        results.append(
+            Playlist(
+                spotify_id=p["id"],
+                name=p["name"],
+                total_tracks=track_count,
+                owner=p.get("owner", {}).get("display_name", ""),
+                description=p.get("description"),
+                image_url=image_url,
+            )
         )
-        for p in playlists
-    ]
+    return results
 
 
 @app.post("/create")
