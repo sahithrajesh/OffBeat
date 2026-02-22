@@ -7,11 +7,15 @@ GET  /auth/callback  → handle Spotify redirect, issue JWT, redirect to fronten
 GET  /auth/me        → return current user info (requires JWT)
 
 GET  /playlists      → fetch the user's Spotify playlists (requires JWT)
-
-(When behind Traefik, these are accessible at /api/* paths)
+POST /analysis       → enrich + analyse selected playlists
+POST /compare        → compare a playlist against analysis data
+POST /basic          → generate a basic playlist from analysis data
+POST /anomaly        → generate an anomaly-based playlist
+POST /create         → create a Spotify playlist from enriched tracks
 
 All protected routes use the ``require_auth`` dependency to extract the
-Spotify user ID from the JWT.
+Spotify user ID from the JWT.  Enrichment (Spotify track fetch + ReccoBeats
++ Last.fm) happens transparently — the frontend never calls /enrich.
 
 Run with::
 
@@ -30,9 +34,11 @@ from fastapi.responses import RedirectResponse
 import uvicorn
 
 import config
+import cache
 from models import Playlist, EnrichedTrack, EnrichedPlaylist
 from spotify_auth import build_authorize_url, exchange_code, get_spotify_user
 from spotify_client import get_user_playlists
+from enricher import enrich_playlists
 from pocketbase_client import upsert_user, get_valid_access_token, get_user
 from session import create_session_token, verify_session_token
 
@@ -42,6 +48,10 @@ logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] %(levelname)s - %(message)s",
 )
+# Silence noisy HTTP libraries
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("hpack").setLevel(logging.WARNING)
 
 # In-memory state store (for CSRF protection during OAuth).
 # For a hackathon this is fine; production would use Redis / DB.
@@ -158,7 +168,7 @@ async def callback(
 
     # Redirect to frontend with the JWT as a query param.
     redirect_url = f"{config.FRONTEND_URL}/home?token={jwt_token}"
-    return RedirectResponse(redirect_url)
+    return RedirectResponse(redirect_url, status_code=302)
 
 
 @app.get("/auth/me")
@@ -188,11 +198,6 @@ async def my_playlists(spotify_id: str = Depends(require_auth)):
 
     results = []
     for p in playlists:
-        # DEBUG — remove after confirming track counts are correct
-        print(f"[DEBUG] playlist={p.get('name')!r}  tracks_field={p.get('tracks')!r}  total_tracks_field={p.get('total_tracks', 'MISSING')}")
-
-        # Spotify returns tracks as {"href": ..., "total": N} in the listing,
-        # but some API versions also put a root-level "total_tracks" field.
         tracks_field = p.get("tracks")
         if isinstance(tracks_field, dict):
             track_count = tracks_field.get("total", 0)
@@ -219,44 +224,132 @@ async def my_playlists(spotify_id: str = Depends(require_auth)):
     return results
 
 
-@app.post("/create")
-async def create_playlist(
-    tracks: list[EnrichedTrack],
-    spotify_id: str = Depends(require_auth),
-):
-    """Create a Spotify playlist from a list of enriched tracks."""
-    # TODO: Implement playlist creation logic
-    # - Get access token
-    # - Create new playlist via Spotify API
-    # - Add tracks to playlist
-    # - Return playlist info
-    raise HTTPException(status_code=501, detail="Not implemented")
+# ---------------------------------------------------------------------------
+# Internal enrichment helper
+# ---------------------------------------------------------------------------
+
+async def _get_enriched_playlists(
+    spotify_id: str,
+    playlist_ids: list[str],
+) -> list[EnrichedPlaylist]:
+    """Return enriched playlists, using cache where possible.
+
+    This is the single internal entry point that every endpoint calls.
+    It handles:
+      1. Fetching the user's Spotify access token (auto-refresh).
+      2. Checking snapshot_ids to skip unchanged playlists.
+      3. Enriching only what's needed (cache-aware, per-track dedup).
+      4. Persisting results back to PocketBase.
+
+    The frontend never sees this — it just calls an endpoint with playlist
+    IDs and gets results.
+    """
+    access_token = await get_valid_access_token(spotify_id)
+
+    # Lightweight playlist listing to get snapshot_ids
+    all_playlists = await get_user_playlists(access_token)
+    playlist_map = {p["id"]: p for p in all_playlists}
+
+    cached: list[EnrichedPlaylist] = []
+    to_fetch: list[dict] = []
+
+    for pid in playlist_ids:
+        raw = playlist_map.get(pid)
+        if raw is None:
+            logger.warning(f"Playlist {pid} not found in user's library, skipping.")
+            continue
+
+        current_snapshot = raw.get("snapshot_id", "")
+        cached_snapshot = await cache.get_snapshot_id(spotify_id, pid)
+
+        if cached_snapshot and cached_snapshot == current_snapshot:
+            hit = await cache.get(spotify_id, pid)
+            if hit:
+                cached.append(hit)
+                logger.info(f"Cache hit for playlist {pid} (snapshot unchanged)")
+                continue
+
+        to_fetch.append(raw)
+
+    newly_enriched: list[EnrichedPlaylist] = []
+    if to_fetch:
+        logger.info(f"Enriching {len(to_fetch)} playlist(s)…")
+        newly_enriched = await enrich_playlists(access_token, to_fetch)
+        for ep in newly_enriched:
+            raw = playlist_map.get(ep.spotify_id, {})
+            ep.snapshot_id = raw.get("snapshot_id", "")
+            await cache.put(spotify_id, ep)
+
+    return cached + newly_enriched
+
+
+# ---------------------------------------------------------------------------
+# API routes
+# ---------------------------------------------------------------------------
+
+@app.get("/playlists", response_model=list[Playlist])
+async def my_playlists(spotify_id: str = Depends(require_auth)):
+    """Fetch the user's Spotify playlists."""
+    access_token = await get_valid_access_token(spotify_id)  # auto-refreshes
+    playlists = await get_user_playlists(access_token)
+
+    results = []
+    for p in playlists:
+        tracks_field = p.get("tracks")
+        if isinstance(tracks_field, dict):
+            track_count = tracks_field.get("total", 0)
+        elif isinstance(tracks_field, int):
+            track_count = tracks_field
+        else:
+            track_count = 0
+        track_count = p.get("total_tracks", track_count) or track_count
+
+        images = p.get("images") or []
+        image_url = images[0].get("url") if images else None
+
+        results.append(
+            Playlist(
+                spotify_id=p["id"],
+                name=p["name"],
+                total_tracks=track_count,
+                owner=p.get("owner", {}).get("display_name", ""),
+                description=p.get("description"),
+                image_url=image_url,
+            )
+        )
+    return results
 
 
 @app.post("/analysis")
 async def analyze_playlists(
-    playlists: list[Playlist],
+    playlist_ids: list[str],
     spotify_id: str = Depends(require_auth),
 ):
-    """Analyze playlists and return analysis data."""
-    # TODO: Implement analysis logic
-    # - Process playlist data
-    # - Generate analysis metrics
-    # - Return unmodeled data (dict)
+    """Analyse selected playlists.
+
+    Enrichment happens transparently — just send playlist IDs.
+    """
+    enriched = await _get_enriched_playlists(spotify_id, playlist_ids)
+    if not enriched:
+        raise HTTPException(status_code=404, detail="No playlists found to analyse.")
+    # TODO: Implement analysis logic using `enriched`
     raise HTTPException(status_code=501, detail="Not implemented")
 
 
 @app.post("/compare")
 async def compare_playlist(
     analysis_data: dict,
-    playlist: Playlist,
+    playlist_id: str,
     spotify_id: str = Depends(require_auth),
 ):
-    """Compare a playlist against analysis data."""
-    # TODO: Implement comparison logic
-    # - Process analysis data and playlist
-    # - Generate comparison metrics
-    # - Return unmodeled data (dict)
+    """Compare a playlist against analysis data.
+
+    The playlist is enriched transparently if not already cached.
+    """
+    enriched = await _get_enriched_playlists(spotify_id, [playlist_id])
+    if not enriched:
+        raise HTTPException(status_code=404, detail=f"Playlist {playlist_id} not found.")
+    # TODO: Implement comparison logic using `enriched[0]` + `analysis_data`
     raise HTTPException(status_code=501, detail="Not implemented")
 
 
@@ -267,9 +360,6 @@ async def basic_playlist(
 ):
     """Generate a basic playlist from analysis data."""
     # TODO: Implement basic playlist generation logic
-    # - Process analysis data
-    # - Select tracks based on basic criteria
-    # - Return EnrichedPlaylist
     raise HTTPException(status_code=501, detail="Not implemented")
 
 
@@ -280,10 +370,27 @@ async def anomaly_playlist(
 ):
     """Generate an anomaly-based playlist from analysis data."""
     # TODO: Implement anomaly detection logic
-    # - Process analysis data
-    # - Detect anomalous tracks
-    # - Return EnrichedPlaylist
     raise HTTPException(status_code=501, detail="Not implemented")
+
+
+@app.post("/create")
+async def create_playlist(
+    tracks: list[EnrichedTrack],
+    spotify_id: str = Depends(require_auth),
+):
+    """Create a Spotify playlist from a list of enriched tracks."""
+    # TODO: Implement playlist creation logic
+    raise HTTPException(status_code=501, detail="Not implemented")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _enriched_playlist_to_dict(ep: EnrichedPlaylist) -> dict:
+    """Convert an EnrichedPlaylist dataclass to a JSON-safe dict."""
+    from dataclasses import asdict
+    return asdict(ep)
 
 
 # ---------------------------------------------------------------------------
