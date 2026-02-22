@@ -1,5 +1,5 @@
 """Test script – authenticates with Spotify, lets the user select playlists,
-enriches them, and dumps the result as JSON.
+enriches them (using the PocketBase cache), and dumps the result as JSON.
 
 Run directly: ``python data_fetcher.py``
 """
@@ -10,8 +10,9 @@ import asyncio
 import json
 from dataclasses import asdict
 
+import cache
 from models import EnrichedPlaylist
-from spotify_auth import authenticate
+from spotify_auth import authenticate, get_spotify_user
 from spotify_client import get_user_playlists
 from enricher import enrich_playlists
 
@@ -42,12 +43,17 @@ def _select_playlists(playlists: list[dict]) -> list[dict]:
 
 
 async def run() -> list[EnrichedPlaylist]:
-    """Authenticate, select playlists, enrich, and return results."""
+    """Authenticate, select playlists, enrich (cache-aware), and return."""
 
     # -- Authenticate --------------------------------------------------------
     print("Starting Spotify authentication…")
     token = await authenticate()
     print("Authenticated successfully.\n")
+
+    # Get the current user's Spotify ID for cache keying
+    profile = await get_spotify_user(token)
+    user_id = profile["id"]
+    print(f"Logged in as: {profile.get('display_name', user_id)}\n")
 
     # -- List & select playlists ---------------------------------------------
     playlists = await get_user_playlists(token)
@@ -60,9 +66,34 @@ async def run() -> list[EnrichedPlaylist]:
         print("No playlists selected.")
         return []
 
-    # -- Enrich --------------------------------------------------------------
-    enriched = await enrich_playlists(token, selected)
-    return enriched
+    # -- Enrich with cache ---------------------------------------------------
+    cached: list[EnrichedPlaylist] = []
+    to_fetch: list[dict] = []
+
+    for pl in selected:
+        pid = pl["id"]
+        current_snapshot = pl.get("snapshot_id", "")
+        cached_snapshot = await cache.get_snapshot_id(user_id, pid)
+
+        if cached_snapshot and cached_snapshot == current_snapshot:
+            hit = await cache.get(user_id, pid)
+            if hit:
+                print(f"  Cache hit: {pl.get('name', pid)} (snapshot unchanged)")
+                cached.append(hit)
+                continue
+
+        to_fetch.append(pl)
+
+    newly_enriched: list[EnrichedPlaylist] = []
+    if to_fetch:
+        print(f"\nEnriching {len(to_fetch)} playlist(s) (not cached)…")
+        newly_enriched = await enrich_playlists(token, to_fetch)
+        for ep in newly_enriched:
+            raw = next((p for p in selected if p["id"] == ep.spotify_id), {})
+            ep.snapshot_id = raw.get("snapshot_id", "")
+            await cache.put(user_id, ep)
+
+    return cached + newly_enriched
 
 
 # ---- CLI entry point -------------------------------------------------------

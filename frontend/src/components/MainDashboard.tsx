@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Disc3, Check, AlertCircle, Menu, X } from 'lucide-react';
@@ -14,11 +15,10 @@ interface MainDashboardProps {
 
 export function MainDashboard({ playlists, selectedPlaylists, togglePlaylist, onActionSelect }: MainDashboardProps) {
   const actions = [
-    { title: "Anomaly Detection", desc: "Find songs that don't belong in these playlists." },
-    { title: "Mood Detection", desc: "Analyze the acoustic sentiment of your tracks." },
-    { title: "Playlist Comparisons", desc: "See the overlap and differences between selections." },
-    { title: "Mood Finder", desc: "Generate a new playlist based on a specific vibe." },
-    { title: "Recommendations", desc: "Get AI suggestions to improve your mixes." }
+    { title: "Anomaly Detection",     key: "anomaly", desc: "Find songs that don't belong in these playlists." },
+    { title: "Playlist Analysis",     key: "analysis", desc: "Run Sphinx AI analysis on your selected playlists." },
+    { title: "Playlist Comparisons",  key: "compare",  desc: "See the overlap and differences between selections." },
+    { title: "Recommendations",       key: "basic",    desc: "Get AI suggestions to improve your mixes." },
   ];
 
   const hasSelection = selectedPlaylists.length > 0;

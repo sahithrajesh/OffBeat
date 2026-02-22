@@ -1,10 +1,16 @@
-"""ReccoBeats API client – track lookup and audio-feature retrieval."""
+"""ReccoBeats API client – track lookup, audio-feature retrieval, and recommendations."""
 
 from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any, Optional
 
 from aiohttp import ClientSession
 
 from models import AudioFeatures
+
+logger = logging.getLogger(__name__)
 
 RECCOBEATS_API = "https://api.reccobeats.com/v1"
 
