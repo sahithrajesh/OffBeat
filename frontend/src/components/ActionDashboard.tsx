@@ -13,12 +13,10 @@ import {
   createPlaylist,
 } from '@/lib/api';
 import {
-  PLACEHOLDER_ANALYSIS,
   AUDIO_FEATURE_META,
   parseAnomalyReason,
   type AnalysisResult,
   type AnalysisPlaylist,
-  type Cluster,
   type Anomaly,
   type AudioMeans,
 } from '@/lib/placeholderData';
@@ -44,7 +42,7 @@ const CLUSTER_COLORS = [
 ];
 
 // ── Feature bar mini-component ──
-function FeatureBar({ label, value, max, unit, color }: { label: string; value: number; max: number; unit: string; color: string }) {
+function FeatureBar({ label, value, unit, color }: { label: string; value: number; max?: number; unit: string; color: string }) {
   const pct = unit === 'dB'
     ? ((value - (-20)) / 20) * 100 // loudness: -20→0 maps to 0→100
     : unit === 'BPM'
@@ -68,7 +66,7 @@ function FeatureBar({ label, value, max, unit, color }: { label: string; value: 
 }
 
 // ── Anomaly card component ──
-function AnomalyCard({ anomaly, index }: { anomaly: Anomaly; index: number }) {
+function AnomalyCard({ anomaly }: { anomaly: Anomaly }) {
   const [expanded, setExpanded] = useState(false);
   const parsed = useMemo(() => parseAnomalyReason(anomaly.reason), [anomaly.reason]);
   const scoreColor = anomaly.anomaly_score >= 0.9 ? 'text-red-400 bg-red-500/15 border-red-500/30'
@@ -391,7 +389,7 @@ function AnomalyView({ data }: { data: AnalysisResult }) {
               </div>
               <div className="space-y-1.5">
                 {items.slice(0, 5).map((a) => (
-                  <AnomalyCard key={a.spotify_id} anomaly={a} index={0} />
+                  <AnomalyCard key={a.spotify_id} anomaly={a} />
                 ))}
                 {items.length > 5 && (
                   <p className="text-[11px] text-brand-teal/40 text-center pt-2">+{items.length - 5} more</p>
@@ -420,8 +418,8 @@ function AnomalySection({ anomalies }: { anomalies: Anomaly[] }) {
         <Badge className="bg-red-500/15 text-red-400 border-0 text-xs">{anomalies.length}</Badge>
       </h3>
       <div className="space-y-2">
-        {visible.map((a, i) => (
-          <AnomalyCard key={a.spotify_id} anomaly={a} index={i} />
+        {visible.map((a) => (
+          <AnomalyCard key={a.spotify_id} anomaly={a} />
         ))}
       </div>
       {anomalies.length > 8 && (
