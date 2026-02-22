@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import secrets
 import logging
+from dataclasses import asdict
 from typing import Optional
 
 from fastapi import FastAPI, Depends, HTTPException, Query, Request
@@ -35,7 +36,18 @@ import uvicorn
 
 import config
 import cache
-from models import Playlist, EnrichedTrack, EnrichedPlaylist
+from models import (
+    Playlist,
+    EnrichedTrack,
+    EnrichedPlaylist,
+    AnalysisOutput,
+    AnalysisSummary,
+    AnalysisCluster,
+    AnalysisCentroidFeatures,
+    AnalysisTrackRow,
+    AnalysisTrackRef,
+    MoodEntry,
+)
 from spotify_auth import build_authorize_url, exchange_code, get_spotify_user
 from spotify_client import get_user_playlists, create_new_playlist, add_tracks_to_playlist
 from enricher import enrich_playlists

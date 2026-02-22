@@ -3,3 +3,4 @@
 .venv
 __pycache__/
 */enriched_playlists.json
+*/playlist_analysis_insights.json

@@ -318,7 +318,14 @@ async def get_cluster_recommendations(
 
             # Deduplicate: don't recommend songs already in the cluster
             existing_ids = {t["spotify_id"] for t in cluster_info.get("tracks", [])}
-            recs = [r for r in recs if r["spotify_id"] not in existing_ids]
+            seen: set[str] = set()
+            deduped: list[dict[str, Any]] = []
+            for r in recs:
+                sid = r["spotify_id"]
+                if sid not in existing_ids and sid not in seen:
+                    seen.add(sid)
+                    deduped.append(r)
+            recs = deduped
 
             cluster_results[cluster_label] = {
                 "cluster_id": cluster_info.get("cluster_id"),

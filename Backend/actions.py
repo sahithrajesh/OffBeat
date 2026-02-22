@@ -1,3 +1,4 @@
+from __future__ import annotations
 '''################### BEGIN CELL 1 ###################'''
 # Load example_playlists from enriched_playlists.json and inspect missing audio_features/tags
 import json
@@ -94,7 +95,6 @@ for t in pl0.tracks[:3]:
 
 '''################### BEGIN CELL 2 ###################'''
 # Helper utilities for feature extraction, tag encoding, and clustering inputs
-from __future__ import annotations
 
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Tuple
@@ -267,8 +267,6 @@ def _eligible_mask(tracks: List[models.EnrichedTrack]) -> np.ndarray:
 
 '''################### BEGIN CELL 3 ###################'''
 # Implement run_playlist_analysis (clustering + anomaly detection) with robust missing-data handling
-from __future__ import annotations
-
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -713,8 +711,6 @@ print(json.dumps(analysis_preview, indent=2, ensure_ascii=False))
 
 '''################### BEGIN CELL 5 ###################'''
 # Implement simplified compare_playlists (mood-label distribution + overlap)
-from __future__ import annotations
-
 from itertools import combinations
 from typing import Dict, List, Tuple
 
@@ -865,8 +861,45 @@ def compare_playlists(playlists: List[models.EnrichedPlaylist], top_n: int = 6) 
     }
 
 
-# Keep other functions from earlier cells (select_tracks_by_mood, recommend_for_*) as-is.
+# Keep other functions from earlier cells (select_tracks_by_mood, recommend_for_*).
 # They live in other cells and continue to reference run_playlist_analysis.
+
+
+def select_tracks_by_mood(playlists: List[models.EnrichedPlaylist], mood_label: str) -> dict:
+    """Return tracks across playlists matching a given mood label.
+
+    Output schema mirrors other analysis helpers: includes "tracks" list of
+    {spotify_id,title,playlist_id,playlist_name,cluster_id,...} rows.
+    """
+    if not playlists or not mood_label:
+        return {"tracks": []}
+
+    out_tracks: List[dict] = []
+    for pl in playlists:
+        analysis = _get_or_run_analysis(pl)
+        # iterate clusters; include tracks whose cluster label matches
+        for c in analysis.get("clusters") or []:
+            if c.get("label") == mood_label:
+                for tr in c.get("tracks") or []:
+                    row = dict(tr)
+                    row.update({
+                        "playlist_id": pl.spotify_id,
+                        "playlist_name": pl.name,
+                    })
+                    out_tracks.append(row)
+    return {"mood_label": mood_label, "tracks": out_tracks}
+
+
+# stub recommendation functions (not exercised in this script)
+
+def recommend_for_anomalies(playlists: List[models.EnrichedPlaylist]) -> dict:
+    # placeholder; real logic uses analysis results to build rec payloads
+    return {"playlists": []}
+
+
+def recommend_for_mood(playlists: List[models.EnrichedPlaylist], mood_label: str) -> dict:
+    return {"playlists": [], "mood": mood_label}
+
 '''################### END CELL 5 ###################'''
 
 

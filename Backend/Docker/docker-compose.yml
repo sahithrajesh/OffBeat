@@ -27,6 +27,11 @@ services:
       - "traefik.http.routers.pocketbase.priority=10"
       - "traefik.http.routers.pocketbase.entrypoints=websecure"
       - "traefik.http.routers.pocketbase.tls=true"
+      # Route PocketBase API with higher priority than backend
+      - "traefik.http.routers.pocketbase-api.rule=Host(`off-beat.tech`) && PathPrefix(`/api/collections`) || Host(`off-beat.tech`) && PathPrefix(`/api/admin`) || Host(`off-beat.tech`) && PathPrefix(`/api/files`)"
+      - "traefik.http.routers.pocketbase-api.priority=25"
+      - "traefik.http.routers.pocketbase-api.entrypoints=websecure"
+      - "traefik.http.routers.pocketbase-api.tls=true"
       - "traefik.http.services.pocketbase.loadbalancer.server.port=8090"
       - "traefik.http.services.pocketbase.loadbalancer.server.scheme=http"
 

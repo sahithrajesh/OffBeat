@@ -94,7 +94,7 @@ async def get_playlist_tracks(
         for pid_index, pid in enumerate(playlist_ids, 1):
             url: str | None = (
                 f"{SPOTIFY_API}/playlists/{pid}/items"
-                "?fields=items(item(id,name,artists(name,id),album(name),duration_ms,linked_from(id))),next"
+                "?fields=items(item(id,name,preview_url,artists(name,id),album(name),duration_ms,linked_from(id))),next"
                 "&limit=100&market=US"
             )
             
