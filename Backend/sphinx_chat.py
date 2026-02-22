@@ -188,6 +188,13 @@ def _build_data_cell(
         "import json, warnings, pathlib",
         "warnings.filterwarnings('ignore')",
         "",
+        "# Configure matplotlib for notebook visualization",
+        "%matplotlib inline",
+        "import matplotlib.pyplot as plt",
+        "import matplotlib",
+        "matplotlib.rcParams['figure.figsize'] = (12, 6)",
+        "matplotlib.rcParams['figure.dpi'] = 100",
+        "",
         f"enriched_playlists = json.loads(pathlib.Path(r'{ep_path}').read_text())",
         "",
     ]
@@ -211,6 +218,15 @@ def _build_data_cell(
         "        t['_playlist_name'] = pl.get('name', '')",
         "        all_tracks.append(t)",
         f"print(f'Loaded {{len(enriched_playlists)}} playlists, {{len(all_tracks)}} total tracks')",
+        "",
+        "# Helper to ensure plots display correctly in notebook",
+        "def show_plot(fig=None):",
+        "    \"\"\"Display the current or given matplotlib figure in the notebook.\"\"\"",
+        "    if fig is None:",
+        "        fig = plt.gcf()",
+        "    plt.tight_layout()",
+        "    plt.show()",
+        "    return fig",
     ]
     return "\n".join(lines)
 
@@ -250,9 +266,15 @@ def _build_context_markdown(
     parts += [
         "\n---\n",
         "The user will ask questions about their playlist data. ",
-        "You can reference `enriched_playlists`, `analysis_results`, "
-        "and `all_tracks` variables. ",
-        "For visualizations, use **matplotlib** or **plotly**. ",
+        "You can reference `enriched_playlists`, `analysis_results`, and `all_tracks` variables. ",
+        "\n## Visualization Instructions\n",
+        "For visualizations, use **matplotlib** and always call `plt.show()` or `plt.savefig()` to render the plot.",
+        "Remember:\n",
+        "- Always set appropriate figure sizes: `plt.figure(figsize=(12, 6))`\n",
+        "- Use clear titles with `plt.title()`\n",
+        "- Label axes with `plt.xlabel()` and `plt.ylabel()`\n",
+        "- Call `plt.show()` at the end to render the visualization in the notebook\n",
+        "- Never create plots without displaying them\n",
         "For explanations, answer concisely in Markdown.",
     ]
     return "\n".join(parts)
@@ -509,11 +531,15 @@ async def run_sphinx(
         f"{action_block}"
         f"{history_block}"
         f"USER QUESTION: {prompt}\n\n"
-        f"Answer the user's question directly using the playlist data and the current view context above. "
-        f"Use the conversation history for context on follow-up questions. "
-        f"Refer to specific tracks by name and artist. "
-        f"If the user asks about anomalies, explain why using the anomaly scores, reasons, and cluster context. "
-        f"If the user asks about recommendations, use the CURRENT VIEW data to explain which songs were recommended and why."
+        f"Instructions:\n"
+        f"1. Answer the user's question directly using the playlist data and the current view context provided above.\n"
+        f"2. Use the conversation history for context on follow-up questions.\n"
+        f"3. Refer to specific tracks by name and artist.\n"
+        f"4. If the user asks about anomalies, explain why using the anomaly scores, reasons, and cluster context.\n"
+        f"5. If the user asks about recommendations, use the CURRENT VIEW data to explain which songs were recommended.\n"
+        f"6. If the user asks for a visualization, plot, or graph: ALWAYS use matplotlib and MUST call plt.show() to render it.\n"
+        f"7. For matplotlib plots: set figure size, add title, label axes, and call plt.show() at the end.\n"
+        f"8. Never create a plot without displaying it with plt.show().\n"
     )
 
     # Record the user message in history
