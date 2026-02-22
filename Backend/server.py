@@ -54,7 +54,6 @@ from enricher import enrich_playlists
 from pocketbase_client import upsert_user, get_valid_access_token, get_user
 from session import create_session_token, verify_session_token
 from reccobeats_client import get_cluster_recommendations
-from notebook_runner import run_analysis_notebook
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -366,19 +365,7 @@ async def analyze_playlists(
     enriched = await _get_enriched_playlists(spotify_id, playlist_ids)
     if not enriched:
         raise HTTPException(status_code=404, detail="No playlists found to analyse.")
-
-    try:
-        results = run_analysis_notebook(enriched)
-    except RuntimeError as exc:
-        logger.exception("Analysis notebook failed")
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    if not results:
-        raise HTTPException(status_code=500, detail="Analysis produced no results.")
-
-    # Return as JSON-serializable dicts
-    from dataclasses import asdict
-    return [asdict(r) for r in results]
+    raise HTTPException(status_code=501, detail="Not implemented")  # TODO: Implement papermill execution
 
 
 @app.post("/compare")
