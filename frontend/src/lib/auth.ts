@@ -9,7 +9,7 @@
 const TOKEN_KEY = "hacklytics_jwt";
 
 // Backend base URL — matches the Vite dev proxy or production deploy.
-export const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+export const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 // ---- token helpers -------------------------------------------------------
 
