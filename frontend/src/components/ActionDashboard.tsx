@@ -44,23 +44,6 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // -----------------------------------------------------------------------
-  // Audio preview
-  // -----------------------------------------------------------------------
-  const togglePreview = (trackId: string, previewUrl: string) => {
-    if (!audioRef.current) {
-      audioRef.current = new Audio(previewUrl);
-    }
-    if (playingTrackId === trackId) {
-      audioRef.current.pause();
-      setPlayingTrackId(null);
-      return;
-    }
-    audioRef.current.src = previewUrl;
-    audioRef.current.play();
-    setPlayingTrackId(trackId);
-  };
-
-  // -----------------------------------------------------------------------
   // Save to Spotify
   // -----------------------------------------------------------------------
   const handleSaveToSpotify = useCallback(async () => {
@@ -206,11 +189,11 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
                   <div className="space-y-3 sm:space-y-4 mb-4 sm:mb-6">
                     <div>
                       <div className="flex justify-between text-xs mb-1.5"><span className="text-brand-lavender/80">Energy</span><span className="text-brand-cyan">{(cluster.centroid_features.audio_means.energy * 100).toFixed(0)}%</span></div>
-                      <Progress value={cluster.centroid_features.audio_means.energy * 100} className="h-1.5 bg-white/5" indicatorColor="bg-brand-cyan" />
+                      <Progress value={cluster.centroid_features.audio_means.energy * 100} className="h-1.5 bg-white/5" />
                     </div>
                     <div>
                       <div className="flex justify-between text-xs mb-1.5"><span className="text-brand-lavender/80">Danceability</span><span className="text-brand-magenta">{(cluster.centroid_features.audio_means.danceability * 100).toFixed(0)}%</span></div>
-                      <Progress value={cluster.centroid_features.audio_means.danceability * 100} className="h-1.5 bg-white/5" indicatorColor="bg-brand-magenta" />
+                      <Progress value={cluster.centroid_features.audio_means.danceability * 100} className="h-1.5 bg-white/5" />
                     </div>
                   </div>
 
