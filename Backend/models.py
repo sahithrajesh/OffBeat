@@ -64,3 +64,17 @@ class EnrichedTrack:
 
     # ReccoBeats internal id (useful for further API calls)
     reccobeats_id: Optional[str] = None
+
+
+@dataclass
+class Playlist:
+    """A Spotify playlist represented as a collection of EnrichedTracks."""
+
+    spotify_id: str
+    name: str
+    tracks: list[EnrichedTrack] = field(default_factory=list)
+    description: Optional[str] = None
+    owner: Optional[str] = None
+    snapshot_id: Optional[str] = None
+    image_url: Optional[str] = None
+    total_tracks: int = 0
