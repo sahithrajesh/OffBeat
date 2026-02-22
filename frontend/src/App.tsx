@@ -71,9 +71,9 @@ function HomePage() {
     if (tokenParam) {
       // Persist token and strip it from the URL.
       setToken(tokenParam);
+      // Strip token from URL and prepare to fetch
       navigate('/home', { replace: true });
-      // Don't setReady here — the navigate will re-render, and on the
-      // next run tokenParam will be null so we fall into the else-if.
+      setReady(true);
       return;
     }
 

@@ -14,6 +14,8 @@ entryPoints:
 
   websecure:
     address: ":443"
+    http:
+      tls: {} # This tells Traefik to automatically use its default self-signed cert for all traffic on 443
 
 api:
   insecure: false
@@ -23,3 +25,5 @@ providers:
   docker:
     endpoint: "unix:///var/run/docker.sock"
     exposedByDefault: false
+
+accessLog: {}

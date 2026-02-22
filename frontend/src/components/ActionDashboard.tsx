@@ -9,6 +9,7 @@ import {
   comparePlaylist,
   basicRecommendations,
   anomalyRecommendations,
+  createPlaylist,
 } from '@/lib/api';
 
 /** Human-readable labels for backend action keys */
@@ -18,6 +19,25 @@ const ACTION_LABELS: Record<string, string> = {
   basic: 'Recommendations',
   anomaly: 'Anomaly Detection',
 };
+
+const handleSaveToSpotify = async () => {
+    // Ensure we actually have track data to save
+    if (!result || !('tracks' in result) || !Array.isArray((result as EnrichedPlaylist).tracks)) return;
+    
+    setIsSaving(true);
+    setSaveStatus('idle');
+    
+    try {
+      await createPlaylist((result as EnrichedPlaylist).tracks);
+      setSaveStatus('success');
+      setTimeout(() => setSaveStatus('idle'), 3000); // Reset button after 3s
+    } catch (err) {
+      console.error('Failed to save to Spotify', err);
+      setSaveStatus('error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
 interface ActionDashboardProps {
   selectedPlaylists: Playlist[];
@@ -31,6 +51,8 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
   // Generic result bucket — shape depends on the endpoint.
   const [result, setResult] = useState<Record<string, unknown> | EnrichedPlaylist | null>(null);
 
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const label = ACTION_LABELS[currentAction] ?? currentAction;
 
   // -----------------------------------------------------------------------
@@ -135,7 +157,7 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
     <div className="flex h-screen bg-gray-950 text-brand-lavender selection:bg-brand-cyan/30">
       {/* Left Sidebar */}
       <div className="w-80 shrink-0 border-r border-white/5 bg-gray-950/80 flex flex-col z-20 backdrop-blur-xl shadow-2xl">
-        <div className="p-8 font-black text-2xl border-b border-white/5 tracking-tighter text-white">APP_NAME</div>
+        <div className="p-8 font-black text-2xl border-b border-white/5 tracking-tighter text-white">OffBeat</div>
         <div className="px-8 py-6 font-semibold text-xs text-brand-cyan uppercase tracking-[0.2em] opacity-80">Active Scope</div>
         
         <ScrollArea className="flex-1 px-4">
@@ -150,8 +172,20 @@ export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction 
         </ScrollArea>
         
         <div className="p-6 border-t border-white/5">
-           <Button variant="outline" className="w-full h-12 rounded-xl border-white/10 text-white hover:bg-white/5 hover:text-white bg-transparent transition-all duration-300">
-             Save Selection
+           <Button 
+             variant="outline" 
+             onClick={handleSaveToSpotify}
+             disabled={isSaving || !result || !('tracks' in result)}
+             className={`w-full h-12 rounded-xl text-white transition-all duration-300 ${
+               saveStatus === 'success' ? 'bg-green-500/20 border-green-500/50 text-green-400 hover:bg-green-500/30' :
+               saveStatus === 'error' ? 'bg-red-500/20 border-red-500/50 text-red-400 hover:bg-red-500/30' :
+               'border-white/10 hover:bg-white/5 hover:text-white bg-transparent'
+             }`}
+           >
+             {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+             {saveStatus === 'success' ? 'Saved to Library!' : 
+              saveStatus === 'error' ? 'Failed to Create' : 
+              'Create Playlist'}
            </Button>
         </div>
       </div>
