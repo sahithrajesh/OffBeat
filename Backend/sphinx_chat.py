@@ -337,12 +337,14 @@ async def run_sphinx(
 
     # Build command
     sphinx_api_key = os.environ.get("SPHINX_API_KEY", "")
+    rules_path = Path(__file__).parent / "chat_response_style.md"
     cmd = [
         "sphinx-cli", "chat",
         "--notebook-filepath", nb_path,
         "--prompt", prompt,
         "--jupyter-server-url", jupyter_url,
         "--jupyter-server-token", _JUPYTER_TOKEN,
+        "--sphinx-rules-path", str(rules_path),
         "--no-memory-read",
         "--no-memory-write",
         "--no-web-search",
