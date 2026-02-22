@@ -1,15 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { MainDashboard } from './components/MainDashboard';
 import { ActionDashboard } from './components/ActionDashboard';
 import { Button } from '@/components/ui/button';
 
-// Mock types for our data
 export type Playlist = { id: string; name: string };
 
 export default function App() {
+  useEffect(() => {
+    document.documentElement.classList.add('dark');
+  }, []);
+
   const [currentView, setCurrentView] = useState<'login' | 'main' | 'action'>('login');
   
-  // Mock Spotify Data
   const [playlists] = useState<Playlist[]>([
     { id: '1', name: "Focus Flow" },
     { id: '2', name: "Late Night Coding" },
@@ -19,22 +21,26 @@ export default function App() {
   const [selectedPlaylists, setSelectedPlaylists] = useState<string[]>([]);
   const [currentAction, setCurrentAction] = useState<string>("");
 
-  // View 1: Sign In / Auth
   if (currentView === 'login') {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-neutral-100">
-        <div className="bg-white p-12 rounded-xl shadow-lg border flex flex-col items-center">
-          <h1 className="text-3xl font-bold mb-2">Hacklytics App</h1>
-          <p className="text-neutral-500 mb-8">AI-Powered Playlist Analytics</p>
-          <Button size="lg" onClick={() => setCurrentView('main')}>
-            Login with Spotify
+      <div className="flex h-screen w-full items-center justify-center bg-gray-950 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-brand-navy/20 to-transparent text-brand-lavender">
+        <div className="bg-gray-900/40 backdrop-blur-md p-12 rounded-2xl border border-white/5 shadow-2xl flex flex-col items-center">
+          <h1 className="text-4xl font-extrabold tracking-tight mb-2 text-white">
+            Hacklytics App
+          </h1>
+          <p className="text-brand-teal mb-8 font-medium">AI-Powered Playlist Analytics</p>
+          <Button 
+            size="lg" 
+            className="bg-brand-cyan hover:bg-[#007acc] text-white border-0 transition-colors"
+            onClick={() => setCurrentView('main')}
+          >
+            Authenticate via Spotify
           </Button>
         </div>
       </div>
     );
   }
 
-  // View 2: Main Dashboard
   if (currentView === 'main') {
     return (
       <MainDashboard 
@@ -53,7 +59,6 @@ export default function App() {
     );
   }
 
-  // View 3: Action Dashboard
   if (currentView === 'action') {
     return (
       <ActionDashboard 

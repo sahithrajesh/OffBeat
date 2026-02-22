@@ -6,7 +6,9 @@ GET  /auth/login     → redirect user to Spotify
 GET  /auth/callback  → handle Spotify redirect, issue JWT, redirect to frontend
 GET  /auth/me        → return current user info (requires JWT)
 
-GET  /api/playlists  → fetch the user's Spotify playlists (requires JWT)
+GET  /playlists      → fetch the user's Spotify playlists (requires JWT)
+
+(When behind Traefik, these are accessible at /api/* paths)
 
 All protected routes use the ``require_auth`` dependency to extract the
 Spotify user ID from the JWT.
@@ -151,7 +153,7 @@ async def me(spotify_id: str = Depends(require_auth)):
 # API routes
 # ---------------------------------------------------------------------------
 
-@app.get("/api/playlists", response_model=list[Playlist])
+@app.get("/playlists", response_model=list[Playlist])
 async def my_playlists(spotify_id: str = Depends(require_auth)):
     """Fetch the user's Spotify playlists."""
     access_token = await get_valid_access_token(spotify_id)  # auto-refreshes
@@ -170,7 +172,7 @@ async def my_playlists(spotify_id: str = Depends(require_auth)):
     ]
 
 
-@app.post("/api/create")
+@app.post("/create")
 async def create_playlist(
     tracks: list[EnrichedTrack],
     spotify_id: str = Depends(require_auth),
@@ -184,7 +186,7 @@ async def create_playlist(
     raise HTTPException(status_code=501, detail="Not implemented")
 
 
-@app.post("/api/analysis")
+@app.post("/analysis")
 async def analyze_playlists(
     playlists: list[Playlist],
     spotify_id: str = Depends(require_auth),
@@ -197,7 +199,7 @@ async def analyze_playlists(
     raise HTTPException(status_code=501, detail="Not implemented")
 
 
-@app.post("/api/compare")
+@app.post("/compare")
 async def compare_playlist(
     analysis_data: dict,
     playlist: Playlist,
@@ -211,7 +213,7 @@ async def compare_playlist(
     raise HTTPException(status_code=501, detail="Not implemented")
 
 
-@app.post("/api/basic", response_model=EnrichedPlaylist)
+@app.post("/basic", response_model=EnrichedPlaylist)
 async def basic_playlist(
     analysis_data: dict,
     spotify_id: str = Depends(require_auth),
@@ -224,7 +226,7 @@ async def basic_playlist(
     raise HTTPException(status_code=501, detail="Not implemented")
 
 
-@app.post("/api/anomaly", response_model=EnrichedPlaylist)
+@app.post("/anomaly", response_model=EnrichedPlaylist)
 async def anomaly_playlist(
     analysis_data: dict,
     spotify_id: str = Depends(require_auth),

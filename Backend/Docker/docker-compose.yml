@@ -1,6 +1,20 @@
 version: "3.8"
 
 services:
+  traefik:
+    image: traefik:v2.10
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./traefik.yml:/traefik.yml:ro
+      - ./acme.json:/acme.json
+    labels:
+      - "traefik.enable=true"
+
   pocketbase:
     image: ghcr.io/muchobien/pocketbase:latest
     container_name: pocketbase
@@ -10,6 +24,8 @@ services:
     volumes:
       - pb_data:/pb/pb_data
       - pb_public:/pb/pb_public
+    networks:
+      - app-network
 
   backend:
     build:
@@ -17,13 +33,38 @@ services:
       dockerfile: Docker/Dockerfile
     container_name: backend
     restart: unless-stopped
-    ports:
-      - "8888:8888"
     env_file:
       - ../.env
     depends_on:
       - pocketbase
+    networks:
+      - app-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=PathPrefix(`/api`)"
+      - "traefik.http.routers.backend.entrypoints=web,websecure"
+      - "traefik.http.services.backend.loadbalancer.server.port=8888"
+      - "traefik.http.middlewares.backend-stripprefix.stripprefix.prefixes=/api"
+      - "traefik.http.routers.backend.middlewares=backend-stripprefix"
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile.prod
+    container_name: frontend
+    restart: unless-stopped
+    networks:
+      - app-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.frontend.entrypoints=web,websecure"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
 
 volumes:
   pb_data:
   pb_public:
+
+networks:
+  app-network:
+    driver: bridge

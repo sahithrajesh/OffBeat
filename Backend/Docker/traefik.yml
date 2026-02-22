@@ -1,0 +1,32 @@
+global:
+  checkNewVersion: true
+  sendAnonymousUsage: false
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entrypoint:
+          to: websecure
+          scheme: https
+  websecure:
+    address: ":443"
+
+api:
+  insecure: false
+  dashboard: true
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    swarmMode: false
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: "your-email@example.com"
+      storage: acme.json
+      httpChallenge:
+        entryPoint: web
