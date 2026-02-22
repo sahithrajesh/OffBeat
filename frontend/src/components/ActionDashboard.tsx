@@ -20,7 +20,26 @@ const ACTION_LABELS: Record<string, string> = {
   anomaly: 'Anomaly Detection',
 };
 
-const handleSaveToSpotify = async () => {
+interface ActionDashboardProps {
+  selectedPlaylists: Playlist[];
+  currentAction: string;          // action key: "analysis" | "compare" | "basic" | "anomaly"
+  onNewAction: () => void;
+}
+
+export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction }: ActionDashboardProps) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  // Generic result bucket — shape depends on the endpoint.
+  const [result, setResult] = useState<Record<string, unknown> | EnrichedPlaylist | null>(null);
+
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const label = ACTION_LABELS[currentAction] ?? currentAction;
+
+  // -----------------------------------------------------------------------
+  // Handle saving to Spotify
+  // -----------------------------------------------------------------------
+  const handleSaveToSpotify = useCallback(async () => {
     // Ensure we actually have track data to save
     if (!result || !('tracks' in result) || !Array.isArray((result as EnrichedPlaylist).tracks)) return;
     
@@ -37,23 +56,7 @@ const handleSaveToSpotify = async () => {
     } finally {
       setIsSaving(false);
     }
-  };
-
-interface ActionDashboardProps {
-  selectedPlaylists: Playlist[];
-  currentAction: string;          // action key: "analysis" | "compare" | "basic" | "anomaly"
-  onNewAction: () => void;
-}
-
-export function ActionDashboard({ selectedPlaylists, currentAction, onNewAction }: ActionDashboardProps) {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  // Generic result bucket — shape depends on the endpoint.
-  const [result, setResult] = useState<Record<string, unknown> | EnrichedPlaylist | null>(null);
-
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const label = ACTION_LABELS[currentAction] ?? currentAction;
+  }, [result]);
 
   // -----------------------------------------------------------------------
   // Run the action once on mount
