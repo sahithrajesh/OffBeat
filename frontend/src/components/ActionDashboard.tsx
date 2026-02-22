@@ -85,6 +85,7 @@ function FeatureBar({ label, value, unit, color }: { label: string; value: numbe
 // ── Anomaly card component ──
 function AnomalyCard({ anomaly, selectedTrackIds, onToggleTrack }: { anomaly: Anomaly } & TrackSelectionProps) {
   const [expanded, setExpanded] = useState(false);
+  const expandedRef = useRef<HTMLDivElement>(null);
   const parsed = useMemo(() => parseAnomalyReason(anomaly.reason), [anomaly.reason]);
   const scoreColor = anomaly.anomaly_score >= 0.9 ? 'text-red-400 bg-red-500/15 border-red-500/30'
     : anomaly.anomaly_score >= 0.85 ? 'text-orange-400 bg-orange-500/15 border-orange-500/30'
@@ -93,7 +94,7 @@ function AnomalyCard({ anomaly, selectedTrackIds, onToggleTrack }: { anomaly: An
 
   return (
     <div
-      className={`rounded-xl border transition-all duration-300 ${
+      className={`rounded-xl border transition-all duration-300 overflow-hidden ${
         isSelected
           ? 'bg-brand-cyan/[0.06] border-brand-cyan/30 shadow-[0_0_10px_rgba(0,158,250,0.06)]'
           : expanded ? 'bg-white/[0.03] border-white/10' : 'bg-white/[0.01] border-white/5 hover:bg-white/[0.02]'
@@ -124,8 +125,15 @@ function AnomalyCard({ anomaly, selectedTrackIds, onToggleTrack }: { anomaly: An
         </button>
       </div>
 
-      {expanded && (
-        <div className="px-3 sm:px-4 pb-3 sm:pb-4 pt-0 space-y-3 animate-in slide-in-from-top-2 duration-200">
+      <div
+        ref={expandedRef}
+        className="transition-all duration-300 ease-out overflow-hidden"
+        style={{
+          maxHeight: expanded ? `${expandedRef.current?.scrollHeight || 0}px` : '0px',
+          opacity: expanded ? 1 : 0,
+        }}
+      >
+        <div className="px-3 sm:px-4 pb-3 sm:pb-4 pt-0 space-y-3">
           {/* Deviation chips */}
           <div className="flex flex-wrap gap-1.5">
             {parsed.deviations.map((d, i) => (
@@ -142,7 +150,7 @@ function AnomalyCard({ anomaly, selectedTrackIds, onToggleTrack }: { anomaly: An
           {/* Full reason */}
           <p className="text-[11px] text-brand-teal/50 leading-relaxed">{anomaly.reason}</p>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -229,11 +237,12 @@ function AnalysisView({ data, selectedTrackIds, onToggleTrack }: { data: Analysi
             // Show top features: energy, danceability, valence, tempo, + expand for all
             const primaryFeatures: (keyof AudioMeans)[] = ['energy', 'danceability', 'valence', 'acousticness'];
             const allFeatures = Object.keys(AUDIO_FEATURE_META) as (keyof AudioMeans)[];
+            const expandedContentRef = useRef<HTMLDivElement>(null);
 
             return (
               <div
                 key={clusterName}
-                className={`border rounded-xl sm:rounded-2xl transition-all duration-300 ${isExpanded ? `${c.bg} ${c.border}` : 'bg-white/[0.02] border-white/5 hover:border-white/10'}`}
+                className={`border rounded-xl sm:rounded-2xl transition-all duration-300 overflow-hidden ${isExpanded ? `${c.bg} ${c.border}` : 'bg-white/[0.02] border-white/5 hover:border-white/10'}`}
               >
                 {/* Card header */}
                 <button
@@ -268,9 +277,16 @@ function AnalysisView({ data, selectedTrackIds, onToggleTrack }: { data: Analysi
                   ))}
                 </div>
 
-                {/* Expanded: all audio features + tag weights + track sample */}
-                {isExpanded && (
-                  <div className="px-4 sm:px-5 pb-4 sm:pb-5 space-y-5 animate-in slide-in-from-top-2 duration-300">
+                {/* Expanded content with smooth max-height transition */}
+                <div
+                  ref={expandedContentRef}
+                  className="transition-all duration-300 ease-out overflow-hidden"
+                  style={{
+                    maxHeight: isExpanded ? `${expandedContentRef.current?.scrollHeight || 0}px` : '0px',
+                    opacity: isExpanded ? 1 : 0,
+                  }}
+                >
+                  <div className="px-4 sm:px-5 pb-4 sm:pb-5 space-y-5">
                     <div className="border-t border-white/5 pt-4">
                       <p className="text-[11px] text-brand-teal/50 uppercase tracking-wider font-semibold mb-3">All Audio Features</p>
                       <div className="space-y-2">
@@ -324,7 +340,7 @@ function AnalysisView({ data, selectedTrackIds, onToggleTrack }: { data: Analysi
                       </div>
                     )}
                   </div>
-                )}
+                </div>
               </div>
             );
           })}
