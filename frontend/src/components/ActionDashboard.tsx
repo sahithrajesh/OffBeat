@@ -161,7 +161,15 @@ function AnomalyCard({ anomaly, selectedTrackIds, onToggleTrack }: { anomaly: An
 function AnalysisView({ data, selectedTrackIds, onToggleTrack }: { data: AnalysisResult } & TrackSelectionProps) {
   const [activePlaylist, setActivePlaylist] = useState(0);
   const [expandedCluster, setExpandedCluster] = useState<string | null>(null);
-  const playlist = data.playlists[activePlaylist];
+  // Ensure activePlaylist is always within bounds if `data.playlists` changes
+  useEffect(() => {
+    if (activePlaylist >= data.playlists.length) {
+      setActivePlaylist(Math.max(0, data.playlists.length - 1));
+      setExpandedCluster(null);
+    }
+  }, [data.playlists, activePlaylist]);
+
+  const playlist = data.playlists[activePlaylist] ?? data.playlists[0];
 
   return (
     <div className="space-y-6 sm:space-y-10 animate-in fade-in duration-700">
@@ -360,7 +368,15 @@ function AnalysisView({ data, selectedTrackIds, onToggleTrack }: { data: Analysi
 // ═══════════════════════════════════════════════════════════════════════════
 function AnomalyView({ data, selectedTrackIds, onToggleTrack }: { data: AnalysisResult } & TrackSelectionProps) {
   const [activePlaylist, setActivePlaylist] = useState(0);
-  const playlist = data.playlists[activePlaylist];
+
+  // Clamp activePlaylist if the incoming data changes
+  useEffect(() => {
+    if (activePlaylist >= data.playlists.length) {
+      setActivePlaylist(Math.max(0, data.playlists.length - 1));
+    }
+  }, [data.playlists, activePlaylist]);
+
+  const playlist = data.playlists[activePlaylist] ?? data.playlists[0];
   const anomalies = playlist.anomalies;
 
   // Group anomalies by cluster_id
@@ -566,6 +582,11 @@ function BasicRecommendationsView({ data, selectedTrackIds, onToggleTrack }: { d
   if (playlistEntries.length === 0) {
     return <p className="text-brand-teal/60 text-sm">No recommendations generated.</p>;
   }
+
+  // Ensure activePlaylist is valid when playlistEntries changes
+  useEffect(() => {
+    if (activePlaylist >= playlistEntries.length) setActivePlaylist(Math.max(0, playlistEntries.length - 1));
+  }, [playlistEntries, activePlaylist]);
 
   const totalRecs = playlistEntries.reduce(
     (sum, [, pl]) => sum + Object.values(pl.clusters).reduce((s, c) => s + c.recommendations.length, 0),
