@@ -30,20 +30,56 @@ import config
 
 _client = PocketBase(config.POCKETBASE_URL)
 _COLLECTION = "spotify_users"
+_admin_token_expires_at: float = 0.0
 
 
-def _ensure_admin_auth() -> None:
+def _ensure_admin_auth(force: bool = False) -> None:
     """Authenticate as a PocketBase superuser if not already authenticated.
 
-    The SDK stores the auth token on the client instance, so this only
-    makes a network call the first time (or after the token expires).
+    The SDK stores the auth token on the client instance, but the token
+    expires after a period (typically 24 hours). This function tracks the
+    expiration time and reauthenticates when needed.
+
+    Args:
+        force: If True, force reauthentication even if token appears valid.
     """
-    if _client.auth_store.token:
-        return  # already authenticated
-    _client.collection("_superusers").auth_with_password(
-        config.POCKETBASE_ADMIN_EMAIL,
-        config.POCKETBASE_ADMIN_PASSWORD,
+    global _admin_token_expires_at
+    
+    # Check if we need to (re)authenticate:
+    # 1. No token exists
+    # 2. Token has expired (with 5-minute buffer)
+    # 3. Force flag is set
+    current_time = time.time()
+    needs_auth = (
+        not _client.auth_store.token
+        or current_time >= (_admin_token_expires_at - 300)  # 5-minute buffer
+        or force
     )
+    
+    if needs_auth:
+        _client.collection("_superusers").auth_with_password(
+            config.POCKETBASE_ADMIN_EMAIL,
+            config.POCKETBASE_ADMIN_PASSWORD,
+        )
+        # PocketBase admin tokens typically expire after 24 hours
+        # Set expiration to 23 hours from now to be safe
+        _admin_token_expires_at = current_time + (23 * 3600)
+
+
+def _with_retry(func, *args, **kwargs):
+    """Execute a function with automatic reauthentication on auth failures.
+    
+    If the function raises a 401/403 auth error, reauthenticate and retry once.
+    """
+    try:
+        return func(*args, **kwargs)
+    except ClientResponseError as e:
+        # If we get an auth error (401 Unauthorized or 403 Forbidden),
+        # our admin token may have expired. Try reauthenticating once.
+        if e.status in (401, 403):
+            _ensure_admin_auth(force=True)
+            return func(*args, **kwargs)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -54,14 +90,18 @@ def _find_by_spotify_id_sync(spotify_id: str) -> Optional[dict[str, Any]]:
     """Query PocketBase for a record matching the given spotify_id."""
     _ensure_admin_auth()
     try:
-        result = _client.collection(_COLLECTION).get_list(
+        result = _with_retry(
+            _client.collection(_COLLECTION).get_list,
             1, 1, {"filter": f'spotify_id="{spotify_id}"'}
         )
         if result.items:
             return _record_to_dict(result.items[0])
         return None
-    except ClientResponseError:
-        return None
+    except ClientResponseError as e:
+        # Only catch non-auth errors here (auth errors handled by _with_retry)
+        if e.status not in (401, 403):
+            return None
+        raise
 
 
 def _upsert_user_sync(
@@ -87,9 +127,15 @@ def _upsert_user_sync(
 
     existing = _find_by_spotify_id_sync(spotify_id)
     if existing:
-        record = _client.collection(_COLLECTION).update(existing["id"], payload)
+        record = _with_retry(
+            _client.collection(_COLLECTION).update,
+            existing["id"], payload
+        )
     else:
-        record = _client.collection(_COLLECTION).create(payload)
+        record = _with_retry(
+            _client.collection(_COLLECTION).create,
+            payload
+        )
     return _record_to_dict(record)
 
 
@@ -111,7 +157,10 @@ def _update_tokens_sync(
     if refresh_token:
         payload["refresh_token"] = refresh_token
 
-    _client.collection(_COLLECTION).update(existing["id"], payload)
+    _with_retry(
+        _client.collection(_COLLECTION).update,
+        existing["id"], payload
+    )
 
 
 def _record_to_dict(record: Any) -> dict[str, Any]:
