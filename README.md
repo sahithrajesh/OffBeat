@@ -2,7 +2,7 @@
 
 https://off-beat.tech
 
-OffBeat is a web app that analyzes your Spotify playlists to understand their core moods, spot outlier tracks, and help you reshape your listening experience. It combines Spotify metadata with audio features from ReccoBeats and social tags from Last.fm to build a rich “mood profile” for every song.
+OffBeat is a web app that analyzes your Spotify playlists to understand their core moods, spot outlier tracks, and help you reshape your listening experience. It combines Spotify metadata with audio features from ReccoBeats and social tags from Last.fm to build a rich “mood profile” for any playlist.
 
 ---
 
